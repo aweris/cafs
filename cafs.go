@@ -1,22 +1,3 @@
-// Package cafs provides a content-addressed virtual filesystem with OCI backend.
-//
-// CAFS implements a Git-like content-addressed storage system that works with
-// OCI registries for distributed storage. Think "Git's object model as a
-// filesystem library with Docker-like namespace:ref addressing."
-//
-// Basic usage:
-//
-//	fs, err := cafs.Open("myorg/project:main")
-//	if err != nil {
-//		return err
-//	}
-//
-//	// Standard filesystem operations
-//	data, err := fs.ReadFile("/config.json")
-//	err = fs.WriteFile("/output.txt", []byte("data"), 0644)
-//
-//	// Sync to remote
-//	hash, err := fs.Push(context.Background())
 package cafs
 
 import (
