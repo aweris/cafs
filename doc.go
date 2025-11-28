@@ -11,7 +11,7 @@
 //   - Content-addressed storage with automatic deduplication
 //   - OCI registry backend for distributed storage (Docker Hub, ttl.sh, etc.)
 //   - Standard Go fs.FS interface compatibility
-//   - Zstd compression with 600x+ ratios on text/JSON
+//   - Direct file path access via Store.Path()
 //   - Lazy and eager loading strategies
 //   - Git-like snapshots with immutable content hashes
 //
@@ -47,7 +47,7 @@
 //   - Content-addressed objects in objects/
 //   - Named references in refs/
 //   - LRU cache for hot objects
-//   - Zstd compression for space efficiency
+//   - Direct file path access via Store.Path()
 //
 // Remote Storage: Any OCI-compatible registry
 //   - Each object becomes an OCI layer
@@ -87,12 +87,6 @@
 //   - WriteFile: 48ns, 0 allocations
 //   - ReadFile: 42ns, 1 allocation
 //   - Cached reads: 10ns
-//   - Push with compression: ~1ms
-//
-// Compression ratios (zstd level 2):
-//   - JSON/Text: 600x+
-//   - Already compressed: skipped automatically
-//   - Small files (<128 bytes): skipped
 //
 // # Options
 //
@@ -105,8 +99,6 @@
 //	cafs.WithAutoPullIfMissing()        // Auto-sync if local ref missing
 //	cafs.WithAlwaysSync()               // Always pull latest on open
 //	cafs.WithPrefetch(paths)            // Eagerly load paths
-//	cafs.WithCompression(enabled)       // Enable/disable compression
-//	cafs.WithCompressionLevel(1-3)      // 1=fast, 2=default, 3=best
 //	cafs.WithAuth(authenticator)        // Custom authentication
 //
 // # Thread Safety
@@ -133,7 +125,7 @@
 //
 // Alpha stage - APIs may change. Core functionality works:
 //   - ✅ Read/Write/Open/Stat/ReadDir operations
-//   - ✅ OCI push/pull with compression
+//   - ✅ OCI push/pull
 //   - ✅ Auto-pull and prefetch
 //   - ✅ Nested directories and tree walking
 //   - ✅ Snapshot immutability and content hashing

@@ -26,7 +26,7 @@ func Open(namespaceRef string, opts ...Option) (FS, error) {
 	}
 
 	cacheDir := expandPath(options.CacheDir)
-	localStore, err := store.NewLocalStore(cacheDir, namespace, options.CacheSize, options.CompressionLevel, options.CompressionEnabled)
+	localStore, err := store.NewLocalStore(cacheDir, namespace, options.CacheSize)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create store: %w", err)
 	}
@@ -125,7 +125,7 @@ func LoadSnapshot(namespaceOrHash string, opts ...Option) (*Snapshot, error) {
 	}
 
 	cacheDir := expandPath(options.CacheDir)
-	localStore, err := store.NewLocalStore(cacheDir, namespace, options.CacheSize, options.CompressionLevel, options.CompressionEnabled)
+	localStore, err := store.NewLocalStore(cacheDir, namespace, options.CacheSize)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create store: %w", err)
 	}

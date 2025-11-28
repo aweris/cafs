@@ -20,7 +20,7 @@ hash, _ := fs.Push(ctx)  // Push to OCI registry
 - Content-addressed storage with automatic deduplication
 - OCI registry backend (Docker Hub, ttl.sh, GHCR, or any OCI-compatible registry)
 - Standard Go `fs.FS` interface
-- Zstd compression with intelligent skip for incompressible data
+- Direct file path access via `Store.Path()`
 - Distributed workflows with auto-pull and prefetch
 - Git-like snapshots with immutable content hashing
 
@@ -71,7 +71,7 @@ data, _ := fs2.ReadFile("/config.json")  // Content automatically available
 
 **Working:**
 - ✅ File operations (read/write/open/stat/readdir)
-- ✅ OCI push/pull with compression
+- ✅ OCI push/pull
 - ✅ Auto-pull and eager prefetch
 - ✅ Nested directories and tree walking
 - ✅ Immutable snapshots with content hashing
@@ -87,7 +87,7 @@ CAFS uses a Git-like Merkle tree:
 - **Blobs** - Files stored by SHA256 hash
 - **Trees** - Directories containing references to children
 - **Snapshots** - Immutable root hashes
-- **Local store** - Compressed objects in `~/.local/share/cafs`
+- **Local store** - Objects in `~/.local/share/cafs`
 - **Remote store** - OCI layers in container registries
 
 ## Inspiration

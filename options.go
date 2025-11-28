@@ -31,14 +31,6 @@ type Options struct {
 	// Default: uses keychain (like Docker)
 	Auth Authenticator
 
-	// CompressionEnabled enables zstd compression for storage
-	// Default: true
-	CompressionEnabled bool
-
-	// CompressionLevel sets the compression level (1=fast, 2=default, 3=best)
-	// Default: 2 (balanced speed/ratio)
-	CompressionLevel int
-
 	// AutoPull controls automatic pulling from remote on Open
 	// "never" (default): only load local cache
 	// "missing": pull if local ref doesn't exist
@@ -52,15 +44,13 @@ type Option func(*Options)
 // defaultOptions returns the default options.
 func defaultOptions() *Options {
 	return &Options{
-		Registry:           "registry.io",
-		CacheDir:           defaultCacheDir(),
-		CacheSize:          1000,
-		ReadOnly:           false,
-		Prefetch:           nil,
-		Auth:               nil,
-		CompressionEnabled: true,
-		CompressionLevel:   2,
-		AutoPull:           "never",
+		Registry:  "registry.io",
+		CacheDir:  defaultCacheDir(),
+		CacheSize: 1000,
+		ReadOnly:  false,
+		Prefetch:  nil,
+		Auth:      nil,
+		AutoPull:  "never",
 	}
 }
 
@@ -110,20 +100,6 @@ func WithAuth(auth Authenticator) Option {
 func WithOptions(opts *Options) Option {
 	return func(o *Options) {
 		*o = *opts
-	}
-}
-
-// WithCompression enables or disables compression.
-func WithCompression(enabled bool) Option {
-	return func(o *Options) {
-		o.CompressionEnabled = enabled
-	}
-}
-
-// WithCompressionLevel sets the compression level (1=fast, 2=default, 3=best).
-func WithCompressionLevel(level int) Option {
-	return func(o *Options) {
-		o.CompressionLevel = level
 	}
 }
 

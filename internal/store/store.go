@@ -37,4 +37,7 @@ type Store interface {
 
 	// Clear clears the in-memory cache.
 	Clear()
+
+	// Path returns the filesystem path for a given hash.
+	Path(hash string) string
 }

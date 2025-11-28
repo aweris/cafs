@@ -7,8 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-
-	"github.com/aweris/cafs/internal/compression"
 )
 
 // LocalStore implements Store using the local filesystem.
@@ -23,13 +21,12 @@ import (
 //
 // Each namespace has its own isolated storage.
 type LocalStore struct {
-	basePath   string
-	namespace  string
-	cache      Cache
-	compressor *compression.Compressor
+	basePath  string
+	namespace string
+	cache     Cache
 }
 
-func NewLocalStore(basePath, namespace string, cacheSize int, compressionLevel int, compressionEnabled bool) (*LocalStore, error) {
+func NewLocalStore(basePath, namespace string, cacheSize int) (*LocalStore, error) {
 	nsPath := filepath.Join(basePath, namespace)
 
 	objectsDir := filepath.Join(nsPath, "objects")
@@ -41,29 +38,21 @@ func NewLocalStore(basePath, namespace string, cacheSize int, compressionLevel i
 		}
 	}
 
-	compressor, err := compression.NewCompressor(compressionLevel, compressionEnabled)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create compressor: %w", err)
-	}
-
 	return &LocalStore{
-		basePath:   nsPath,
-		namespace:  namespace,
-		cache:      NewLRUCache(cacheSize),
-		compressor: compressor,
+		basePath:  nsPath,
+		namespace: namespace,
+		cache:     NewLRUCache(cacheSize),
 	}, nil
 }
 
 // Get retrieves an object by hash.
 func (s *LocalStore) Get(ctx context.Context, hash string) ([]byte, error) {
-	// 1. Check memory cache
 	if data, ok := s.cache.Get(hash); ok {
 		return data, nil
 	}
 
-	// 2. Read from disk
 	path := s.objectPath(hash)
-	compressed, err := os.ReadFile(path)
+	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, fmt.Errorf("object not found: %s", hash)
@@ -71,46 +60,30 @@ func (s *LocalStore) Get(ctx context.Context, hash string) ([]byte, error) {
 		return nil, fmt.Errorf("failed to read object: %w", err)
 	}
 
-	data, err := s.compressor.Decompress(compressed)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decompress object: %w", err)
-	}
-
-	// 3. Cache and return
 	s.cache.Add(hash, data)
 	return data, nil
 }
 
 // Put stores an object and returns its hash.
 func (s *LocalStore) Put(ctx context.Context, data []byte) (string, error) {
-	// 1. Compute hash
 	h := sha256.Sum256(data)
 	hash := hex.EncodeToString(h[:])
 
-	// 2. Check if already exists
 	path := s.objectPath(hash)
 	if _, err := os.Stat(path); err == nil {
 		return hash, nil
 	}
 
-	compressed, err := s.compressor.Compress(data)
-	if err != nil {
-		return "", fmt.Errorf("failed to compress object: %w", err)
-	}
-
-	// 3. Write to disk
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return "", fmt.Errorf("failed to create directory: %w", err)
 	}
 
-	if err := os.WriteFile(path, compressed, 0644); err != nil {
+	if err := os.WriteFile(path, data, 0644); err != nil {
 		return "", fmt.Errorf("failed to write object: %w", err)
 	}
 
-	// 4. Cache in memory
 	s.cache.Add(hash, data)
-
 	return hash, nil
 }
 
@@ -197,8 +170,11 @@ func (s *LocalStore) Clear() {
 	s.cache.Clear()
 }
 
-// objectPath returns the filesystem path for an object hash.
-// Git-style sharding: objects/ab/cd123...
+// Path returns the filesystem path for a given hash.
+func (s *LocalStore) Path(hash string) string {
+	return s.objectPath(hash)
+}
+
 func (s *LocalStore) objectPath(hash string) string {
 	if len(hash) < 2 {
 		return filepath.Join(s.basePath, "objects", hash)
