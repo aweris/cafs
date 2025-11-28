@@ -323,7 +323,7 @@ func (w *Workspace) Pull(ctx context.Context) error {
 	}
 
 	for hash, data := range objects {
-		if _, err := w.store.Put(ctx, data); err != nil {
+		if err := w.store.PutWithHash(ctx, hash, data); err != nil {
 			return fmt.Errorf("failed to store object %s: %w", hash, err)
 		}
 	}
@@ -373,27 +373,37 @@ func (w *Workspace) Ref() string {
 }
 
 func (w *Workspace) DiskPath(name string) (string, error) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-
+	// Fast path: check if already hashed
+	w.mu.RLock()
 	node, err := w.navigate(name)
 	if err != nil {
+		w.mu.RUnlock()
 		return "", err
 	}
 	if node.mode.IsDir() {
+		w.mu.RUnlock()
 		return "", ErrIsDir
 	}
-	if node.hash == "" {
-		hash, encoded, err := encodeBlob(node.content)
-		if err != nil {
-			return "", err
-		}
-		if _, err := w.store.Put(context.Background(), encoded); err != nil {
-			return "", err
-		}
-		node.hash = hash
+	if node.hash != "" {
+		path := w.store.Path(node.hash)
+		w.mu.RUnlock()
+		return path, nil
 	}
-	return w.store.Path(node.hash), nil
+	content := node.content
+	w.mu.RUnlock()
+
+	// Slow path: compute hash and store (outside lock)
+	hash, err := w.store.PutBlob(context.Background(), content)
+	if err != nil {
+		return "", err
+	}
+
+	// Update node hash
+	w.mu.Lock()
+	node.hash = hash
+	w.mu.Unlock()
+
+	return w.store.Path(hash), nil
 }
 
 func (w *Workspace) Has(name string) bool {

@@ -3,8 +3,6 @@ package remote
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"io"
 
@@ -16,6 +14,8 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 	"github.com/google/go-containerregistry/pkg/v1/types"
 )
+
+const hashLen = 64 // SHA256 hex-encoded length
 
 type OCIRemote struct {
 	registry  string // e.g., "registry.io"
@@ -68,9 +68,11 @@ func (r *OCIRemote) Push(ctx context.Context, rootHash string, objects map[strin
 	repoName := fmt.Sprintf("%s/%s", r.registry, r.namespace)
 
 	layers := make([]v1.Layer, 0, len(objects))
-	for _, data := range objects {
+	for hash, data := range objects {
+		// Prefix content with hash so it survives round-trip
+		layerData := append([]byte(hash), data...)
 		layer := &blobLayer{
-			content:   data,
+			content:   layerData,
 			mediaType: types.OCILayer,
 		}
 		layers = append(layers, layer)
@@ -183,10 +185,14 @@ func (r *OCIRemote) Pull(ctx context.Context) (string, map[string][]byte, error)
 			return "", nil, fmt.Errorf("failed to read layer data: %w", err)
 		}
 
-		hash := sha256.Sum256(data)
-		hashStr := hex.EncodeToString(hash[:])
+		// Extract hash prefix and content
+		if len(data) < hashLen {
+			return "", nil, fmt.Errorf("invalid layer: too short")
+		}
+		hash := string(data[:hashLen])
+		content := data[hashLen:]
 
-		objects[hashStr] = data
+		objects[hash] = content
 	}
 
 	return rootHash, objects, nil

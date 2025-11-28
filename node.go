@@ -118,17 +118,14 @@ func (n *Node) loadBlobSize(hash string) (int64, error) {
 	}
 
 	idx := bytes.IndexByte(data, 0)
-	if idx == -1 {
-		return 0, fmt.Errorf("invalid blob format")
+
+	// Raw blob: no header, return data length directly
+	if idx == -1 || !strings.HasPrefix(string(data[:idx]), "blob ") {
+		return int64(len(data)), nil
 	}
 
-	header := string(data[:idx])
-	if !strings.HasPrefix(header, "blob ") {
-		return 0, fmt.Errorf("not a blob")
-	}
-
-	content := data[idx+1:]
-	return int64(len(content)), nil
+	// Has header: return content size (after null terminator)
+	return int64(len(data) - idx - 1), nil
 }
 
 // ensureLoaded loads node content from store if not already loaded.
@@ -150,8 +147,13 @@ func (n *Node) ensureLoaded() error {
 	}
 
 	idx := bytes.IndexByte(data, 0)
-	if idx == -1 {
-		return fmt.Errorf("invalid object format")
+
+	// Raw blob: no null terminator or doesn't start with known header
+	if idx == -1 || (idx > 0 && !strings.HasPrefix(string(data[:idx]), "blob ") && !strings.HasPrefix(string(data[:idx]), "tree ")) {
+		n.content = data
+		n.size = int64(len(data))
+		n.loaded = true
+		return nil
 	}
 
 	header := string(data[:idx])
@@ -239,20 +241,21 @@ func (n *Node) computeHash(store Store) (string, error) {
 	}
 
 	if !n.IsDir() {
-		hash, encoded, err := encodeBlob(n.content)
-		if err != nil {
-			return "", err
-		}
-
 		if store != nil {
-			if _, err := store.Put(context.TODO(), encoded); err != nil {
+			hash, err := store.PutBlob(context.TODO(), n.content)
+			if err != nil {
 				return "", err
 			}
+			n.hash = hash
+		} else {
+			hash, _, err := encodeBlob(n.content)
+			if err != nil {
+				return "", err
+			}
+			n.hash = hash
 		}
-
-		n.hash = hash
 		n.dirty = false
-		return hash, nil
+		return n.hash, nil
 	}
 
 	var entries []treeEntry
@@ -283,7 +286,7 @@ func (n *Node) computeHash(store Store) (string, error) {
 	}
 
 	if store != nil {
-		if _, err := store.Put(context.TODO(), encoded); err != nil {
+		if _, err := store.PutTree(context.TODO(), encoded); err != nil {
 			return "", err
 		}
 	}

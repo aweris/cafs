@@ -113,8 +113,18 @@ func (s *Snapshot) loadNode(hash string) (*Node, error) {
 
 func (s *Snapshot) decodeObject(data []byte, hash string) (*Node, error) {
 	idx := bytes.IndexByte(data, 0)
-	if idx == -1 {
-		return nil, fmt.Errorf("invalid object: missing null terminator")
+
+	// Raw blob: no null terminator or doesn't start with known header
+	if idx == -1 || (idx > 0 && !strings.HasPrefix(string(data[:idx]), "blob ") && !strings.HasPrefix(string(data[:idx]), "tree ")) {
+		node := &Node{
+			content: data,
+			mode:    0644,
+			size:    int64(len(data)),
+			hash:    hash,
+			dirty:   false,
+			store:   s.store,
+		}
+		return node, nil
 	}
 
 	header := string(data[:idx])

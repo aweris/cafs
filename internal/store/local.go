@@ -64,9 +64,11 @@ func (s *LocalStore) Get(ctx context.Context, hash string) ([]byte, error) {
 	return data, nil
 }
 
-// Put stores an object and returns its hash.
-func (s *LocalStore) Put(ctx context.Context, data []byte) (string, error) {
-	h := sha256.Sum256(data)
+// PutBlob stores file content with git-style blob hashing.
+// Hash = SHA256("blob {size}\0" + content), stores raw content on disk.
+func (s *LocalStore) PutBlob(ctx context.Context, content []byte) (string, error) {
+	header := fmt.Sprintf("blob %d\x00", len(content))
+	h := sha256.Sum256(append([]byte(header), content...))
 	hash := hex.EncodeToString(h[:])
 
 	path := s.objectPath(hash)
@@ -79,11 +81,35 @@ func (s *LocalStore) Put(ctx context.Context, data []byte) (string, error) {
 		return "", fmt.Errorf("failed to create directory: %w", err)
 	}
 
-	if err := os.WriteFile(path, data, 0644); err != nil {
+	if err := os.WriteFile(path, content, 0644); err != nil {
 		return "", fmt.Errorf("failed to write object: %w", err)
 	}
 
-	s.cache.Add(hash, data)
+	s.cache.Add(hash, content)
+	return hash, nil
+}
+
+// PutTree stores tree structure as-is.
+// Hash = SHA256(encoded), stores encoded data on disk.
+func (s *LocalStore) PutTree(ctx context.Context, encoded []byte) (string, error) {
+	h := sha256.Sum256(encoded)
+	hash := hex.EncodeToString(h[:])
+
+	path := s.objectPath(hash)
+	if _, err := os.Stat(path); err == nil {
+		return hash, nil
+	}
+
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return "", fmt.Errorf("failed to create directory: %w", err)
+	}
+
+	if err := os.WriteFile(path, encoded, 0644); err != nil {
+		return "", fmt.Errorf("failed to write object: %w", err)
+	}
+
+	s.cache.Add(hash, encoded)
 	return hash, nil
 }
 
@@ -120,11 +146,30 @@ func (s *LocalStore) GetMulti(ctx context.Context, hashes []string) (map[string]
 	return result, nil
 }
 
-// PutMulti stores multiple objects.
+// PutWithHash stores data at a given hash (for objects from remote).
+func (s *LocalStore) PutWithHash(ctx context.Context, hash string, data []byte) error {
+	path := s.objectPath(hash)
+	if _, err := os.Stat(path); err == nil {
+		return nil
+	}
+
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("failed to create directory: %w", err)
+	}
+
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		return fmt.Errorf("failed to write object: %w", err)
+	}
+
+	s.cache.Add(hash, data)
+	return nil
+}
+
+// PutMulti stores multiple objects by hash (batch operation, for remote).
 func (s *LocalStore) PutMulti(ctx context.Context, objects map[string][]byte) error {
-	// TODO: Implement parallel storage
-	for _, data := range objects {
-		if _, err := s.Put(ctx, data); err != nil {
+	for hash, data := range objects {
+		if err := s.PutWithHash(ctx, hash, data); err != nil {
 			return err
 		}
 	}

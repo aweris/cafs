@@ -1,10 +1,9 @@
 // Package store implements the local content storage layer.
 //
-// The Store interface provides a simple key-value abstraction for
-// content-addressed objects. Based on Perkeep's simplicity:
-// - Get/Put/Has for basic operations
-// - Minimal metadata (just size)
-// - Filesystem-based with LRU cache (no index initially)
+// The Store interface provides content-addressed object storage:
+// - PutBlob/PutTree for storing files and directories
+// - Get/Has for retrieval and existence checks
+// - Filesystem-based with LRU cache
 package store
 
 import "context"
@@ -14,8 +13,13 @@ type Store interface {
 	// Get retrieves an object by hash.
 	Get(ctx context.Context, hash string) ([]byte, error)
 
-	// Put stores an object and returns its hash.
-	Put(ctx context.Context, data []byte) (hash string, err error)
+	// PutBlob stores file content with git-style blob hashing.
+	// Hash = SHA256("blob {size}\0" + content), stores raw content on disk.
+	PutBlob(ctx context.Context, content []byte) (hash string, err error)
+
+	// PutTree stores tree structure as-is.
+	// Hash = SHA256(encoded), stores encoded data on disk.
+	PutTree(ctx context.Context, encoded []byte) (hash string, err error)
 
 	// Has checks if an object exists.
 	Has(ctx context.Context, hash string) (bool, error)
@@ -23,7 +27,10 @@ type Store interface {
 	// GetMulti retrieves multiple objects (batch operation).
 	GetMulti(ctx context.Context, hashes []string) (map[string][]byte, error)
 
-	// PutMulti stores multiple objects (batch operation).
+	// PutWithHash stores data at a given hash (for objects from remote).
+	PutWithHash(ctx context.Context, hash string, data []byte) error
+
+	// PutMulti stores multiple objects by hash (batch operation, for remote).
 	PutMulti(ctx context.Context, objects map[string][]byte) error
 
 	// GetRef retrieves a reference (namespace:ref → hash).
