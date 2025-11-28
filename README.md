@@ -1,28 +1,35 @@
 # CAFS
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/aweris/cafs.svg)](https://pkg.go.dev/github.com/aweris/cafs)
-[![Go Report Card](https://goreportcard.com/badge/github.com/aweris/cafs)](https://goreportcard.com/report/github.com/aweris/cafs)
-
-Content-Addressed Filesystem with OCI registry backend for Go.
+Content-Addressable Storage with OCI registry backend.
 
 ## Overview
 
-CAFS combines Git's content-addressed storage with the standard `fs.FS` interface and OCI registries for distribution. Files are stored by content hash, automatically deduplicated, and synced across machines via container registries.
+Simple, lockless content-addressed storage with key-based indexing. Objects are stored by content hash, indexed by arbitrary keys, and synced to OCI registries.
 
 ```go
-fs, _ := cafs.Open("myorg/project:main", cafs.WithRegistry("ttl.sh"))
-fs.WriteFile("/config.json", data, 0644)
-hash, _ := fs.Push(ctx)  // Push to OCI registry
+fs, _ := cafs.Open("myorg/cache:main", cafs.WithRegistry("ttl.sh"))
+
+// Store content (lockless, content-addressed)
+hash, path, _ := fs.Store(data)
+
+// Index by key (lockless)
+fs.Index("my-key", hash)
+
+// Lookup and load
+hash, _ := fs.Lookup("my-key")
+data, _ := fs.Load(hash)
+
+// Sync to remote
+fs.Push(ctx)
 ```
 
 ## Features
 
-- Content-addressed storage with automatic deduplication
-- OCI registry backend (Docker Hub, ttl.sh, GHCR, or any OCI-compatible registry)
-- Standard Go `fs.FS` interface
-- Direct file path access via `Store.Path()`
-- Distributed workflows with auto-pull and prefetch
-- Git-like snapshots with immutable content hashing
+- **Lockless operations** - Store, Load, Index, Lookup all use atomic operations
+- **Content-addressed** - Same content = same hash, automatic deduplication
+- **Key-based indexing** - Map arbitrary keys to content hashes
+- **OCI registry sync** - Push/Pull to any OCI-compatible registry
+- **Direct disk path** - Get filesystem path for zero-copy access
 
 ## Installation
 
@@ -30,77 +37,70 @@ hash, _ := fs.Push(ctx)  // Push to OCI registry
 go get github.com/aweris/cafs
 ```
 
-## Quick Start
+## API
 
 ```go
+type FS interface {
+    // Object store (lockless)
+    Store(data []byte) (hash, path string, err error)
+    Load(hash string) ([]byte, error)
+    Exists(hash string) bool
+    Path(hash string) string
+
+    // Index (lockless)
+    Index(key, hash string)
+    Lookup(key string) (hash string, ok bool)
+    Indexed(key string) bool
+
+    // Sync
+    Push(ctx context.Context) (string, error)
+    Pull(ctx context.Context) error
+}
+```
+
+## Example
+
+```go
+package main
+
 import (
     "context"
+    "fmt"
     "github.com/aweris/cafs"
 )
 
-// Open workspace
-fs, err := cafs.Open("myorg/project:main",
-    cafs.WithRegistry("ttl.sh"))
+func main() {
+    fs, _ := cafs.Open("myorg/cache:main",
+        cafs.WithRegistry("ttl.sh"),
+        cafs.WithCacheDir(".cafs"))
 
-// Write files (nested directories created automatically)
-fs.WriteFile("/src/main.go", []byte("package main"), 0644)
-fs.WriteFile("/config.json", []byte(`{"port": 8080}`), 0644)
+    // Store content
+    hash, path, _ := fs.Store([]byte("Hello, World!"))
+    fmt.Printf("hash=%s path=%s\n", hash, path)
 
-// Push snapshot to registry
-hash, err := fs.Push(context.Background())
+    // Index by key
+    fs.Index("greeting", hash)
 
-// Another machine: pull and read
-fs2, _ := cafs.Open("myorg/project:main",
-    cafs.WithRegistry("ttl.sh"),
-    cafs.WithAutoPullIfMissing())
+    // Lookup by key
+    h, _ := fs.Lookup("greeting")
+    data, _ := fs.Load(h)
+    fmt.Printf("data=%s\n", data)
 
-data, _ := fs2.ReadFile("/config.json")  // Content automatically available
+    // Push to remote
+    fs.Push(context.Background())
+}
 ```
 
-## Documentation
+## Options
 
-- [GoDoc](https://pkg.go.dev/github.com/aweris/cafs) - Complete API reference
-- [Examples](./examples) - Working code examples
-  - [01-quickstart](./examples/01-quickstart) - Basic operations
-  - [02-distributed](./examples/02-distributed) - Multi-machine workflow
-  - [03-nested-dirs](./examples/03-nested-dirs) - Directory operations
-
-## Status
-
-⚠️ **Alpha** - Core functionality works, APIs may change
-
-**Working:**
-- ✅ File operations (read/write/open/stat/readdir)
-- ✅ OCI push/pull
-- ✅ Auto-pull and eager prefetch
-- ✅ Nested directories and tree walking
-- ✅ Immutable snapshots with content hashing
-
-**Planned:**
-- ⏳ Remove/Rename operations
-- ⏳ File handle Write/Seek
-- ⏳ Diff and merge operations
-
-## Architecture
-
-CAFS uses a Git-like Merkle tree:
-- **Blobs** - Files stored by SHA256 hash
-- **Trees** - Directories containing references to children
-- **Snapshots** - Immutable root hashes
-- **Local store** - Objects in `~/.local/share/cafs`
-- **Remote store** - OCI layers in container registries
-
-## Inspiration
-
-- **Git** - Content addressing and object model
-- **OCI** - Distribution and registry standards
-- **Afero** - Filesystem abstraction
-- **IPFS** - Content-addressed storage
+```go
+cafs.WithRegistry("ttl.sh")      // OCI registry URL
+cafs.WithCacheDir("~/.cafs")     // Local cache directory
+cafs.WithCacheSize(1000)         // In-memory LRU cache size
+cafs.WithAutoPull("missing")     // Auto-pull on open: "never", "missing", "always"
+cafs.WithAuth(authenticator)     // Custom registry authentication
+```
 
 ## License
 
-Apache License 2.0 - see [LICENSE](LICENSE) file
-
-## Contributing
-
-Contributions welcome! Please open an issue first to discuss changes.
+Apache License 2.0

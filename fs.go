@@ -1,62 +1,36 @@
 package cafs
 
-import (
-	"context"
-	"io/fs"
-)
+import "context"
 
-// FS is a content-addressed filesystem that composes stdlib interfaces
-// with write and sync operations.
+// FS is a content-addressable storage with key-based indexing.
 type FS interface {
-	Reader
-	Writer
-	Syncer
-	Info
-	BlobStore
-}
+	// Store saves data and returns its content hash and disk path.
+	// Lockless, atomic, idempotent - same content always yields same hash.
+	Store(data []byte) (hash, path string, err error)
 
-// Reader provides read-only filesystem access (stdlib compatible).
-type Reader interface {
-	fs.FS          // Open(name string) (fs.File, error)
-	fs.ReadFileFS  // ReadFile(name string) ([]byte, error)
-	fs.StatFS      // Stat(name string) (fs.FileInfo, error)
-	fs.ReadDirFS   // ReadDir(name string) ([]fs.DirEntry, error)
-}
+	// Load retrieves data by its content hash.
+	Load(hash string) ([]byte, error)
 
-// Writer provides write operations for content.
-// Directories are implicit (derived from file paths in the merkle tree).
-type Writer interface {
-	WriteFile(name string, data []byte, perm fs.FileMode) error
-}
+	// Exists checks if content with given hash exists.
+	Exists(hash string) bool
 
-// Syncer handles remote synchronization of content-addressed snapshots.
-type Syncer interface {
+	// Path returns the disk path for a given hash.
+	Path(hash string) string
+
+	// Index associates a key with a content hash.
+	// Lockless - uses sync.Map internally.
+	Index(key, hash string)
+
+	// Lookup returns the hash associated with a key.
+	Lookup(key string) (hash string, ok bool)
+
+	// Indexed checks if a key exists in the index.
+	Indexed(key string) bool
+
+	// Push syncs local state to remote storage.
+	// Returns the index hash.
 	Push(ctx context.Context) (string, error)
+
+	// Pull fetches state from remote storage.
 	Pull(ctx context.Context) error
-	IsDirty() bool
-}
-
-// Info provides metadata about the filesystem state.
-type Info interface {
-	CurrentDigest() string
-	Namespace() string
-	Ref() string
-	DiskPath(name string) (string, error)
-	Has(name string) bool
-}
-
-// BlobStore provides lockless content-addressed blob storage.
-// Operations are safe for concurrent use without external synchronization.
-type BlobStore interface {
-	// PutBlob stores content and returns hash + disk path. Lockless and idempotent.
-	PutBlob(content []byte) (hash string, diskPath string, err error)
-
-	// GetBlob retrieves content by hash.
-	GetBlob(hash string) ([]byte, error)
-
-	// HasBlob checks if blob exists.
-	HasBlob(hash string) bool
-
-	// BlobPath returns disk path for a hash.
-	BlobPath(hash string) string
 }

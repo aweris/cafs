@@ -11,24 +11,42 @@ import (
 
 func main() {
 	namespace := fmt.Sprintf("test-%d/quickstart:main", time.Now().Unix())
-	fs, err := cafs.Open(namespace, cafs.WithRegistry("ttl.sh"))
+
+	fs, err := cafs.Open(namespace,
+		cafs.WithRegistry("ttl.sh"),
+		cafs.WithCacheDir(".cafs"))
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	if err := fs.WriteFile("/hello.txt", []byte("Hello, CAFS!"), 0644); err != nil {
-		log.Fatal(err)
-	}
-
-	data, err := fs.ReadFile("/hello.txt")
+	// Store content (lockless, content-addressed)
+	hash, path, err := fs.Store([]byte("Hello, CAFS!"))
 	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Printf("Read: %s\n", data)
+	fmt.Printf("Stored: hash=%s path=%s\n", hash[:16], path)
 
-	hash, err := fs.Push(context.Background())
+	// Index by key (lockless)
+	fs.Index("greeting", hash)
+
+	// Lookup by key
+	foundHash, ok := fs.Lookup("greeting")
+	if !ok {
+		log.Fatal("key not found")
+	}
+	fmt.Printf("Lookup: hash=%s\n", foundHash[:16])
+
+	// Load content by hash
+	data, err := fs.Load(foundHash)
 	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Printf("Snapshot: %s\n", hash)
+	fmt.Printf("Loaded: %s\n", data)
+
+	// Push to remote
+	indexHash, err := fs.Push(context.Background())
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Printf("Pushed index: %s\n", indexHash[:16])
 }
