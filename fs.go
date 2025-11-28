@@ -40,4 +40,6 @@ type Info interface {
 	CurrentDigest() string
 	Namespace() string
 	Ref() string
+	DiskPath(name string) (string, error)
+	Has(name string) bool
 }

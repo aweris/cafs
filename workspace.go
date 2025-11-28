@@ -372,6 +372,38 @@ func (w *Workspace) Ref() string {
 	return w.ref
 }
 
+func (w *Workspace) DiskPath(name string) (string, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	node, err := w.navigate(name)
+	if err != nil {
+		return "", err
+	}
+	if node.mode.IsDir() {
+		return "", ErrIsDir
+	}
+	if node.hash == "" {
+		hash, encoded, err := encodeBlob(node.content)
+		if err != nil {
+			return "", err
+		}
+		if _, err := w.store.Put(context.Background(), encoded); err != nil {
+			return "", err
+		}
+		node.hash = hash
+	}
+	return w.store.Path(node.hash), nil
+}
+
+func (w *Workspace) Has(name string) bool {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+
+	_, err := w.navigate(name)
+	return err == nil
+}
+
 // Internal helpers
 
 func (w *Workspace) markDirty(path string) {

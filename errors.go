@@ -27,4 +27,10 @@ var (
 
 	// ErrCorrupted indicates corrupted data (hash mismatch).
 	ErrCorrupted = errors.New("cafs: corrupted data")
+
+	// ErrIsDir indicates operation not valid on directory.
+	ErrIsDir = errors.New("cafs: is a directory")
+
+	// ErrNotCommitted indicates file has no hash yet (not pushed).
+	ErrNotCommitted = errors.New("cafs: file not committed")
 )

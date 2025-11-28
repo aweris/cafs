@@ -37,6 +37,25 @@ func (s *Snapshot) RootHash() string {
 	return s.rootHash
 }
 
+func (s *Snapshot) DiskPath(name string) (string, error) {
+	node, err := s.navigateFromHash(s.rootHash, name)
+	if err != nil {
+		return "", err
+	}
+	if node.IsDir() {
+		return "", ErrIsDir
+	}
+	if node.hash == "" {
+		return "", ErrNotCommitted
+	}
+	return s.store.Path(node.hash), nil
+}
+
+func (s *Snapshot) Has(name string) bool {
+	_, err := s.navigateFromHash(s.rootHash, name)
+	return err == nil
+}
+
 func (s *Snapshot) Open(name string) (fs.File, error) {
 	// TODO: Implement
 	return nil, fs.ErrNotExist
