@@ -414,6 +414,33 @@ func (w *Workspace) Has(name string) bool {
 	return err == nil
 }
 
+// BlobStore implementation - lockless content-addressed storage
+
+// PutBlob stores content and returns hash + disk path. Lockless and idempotent.
+func (w *Workspace) PutBlob(content []byte) (string, string, error) {
+	hash, err := w.store.PutBlob(context.Background(), content)
+	if err != nil {
+		return "", "", err
+	}
+	return hash, w.store.Path(hash), nil
+}
+
+// GetBlob retrieves content by hash.
+func (w *Workspace) GetBlob(hash string) ([]byte, error) {
+	return w.store.Get(context.Background(), hash)
+}
+
+// HasBlob checks if blob exists.
+func (w *Workspace) HasBlob(hash string) bool {
+	exists, _ := w.store.Has(context.Background(), hash)
+	return exists
+}
+
+// BlobPath returns disk path for a hash.
+func (w *Workspace) BlobPath(hash string) string {
+	return w.store.Path(hash)
+}
+
 // Internal helpers
 
 func (w *Workspace) markDirty(path string) {

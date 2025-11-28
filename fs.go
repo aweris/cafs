@@ -12,6 +12,7 @@ type FS interface {
 	Writer
 	Syncer
 	Info
+	BlobStore
 }
 
 // Reader provides read-only filesystem access (stdlib compatible).
@@ -42,4 +43,20 @@ type Info interface {
 	Ref() string
 	DiskPath(name string) (string, error)
 	Has(name string) bool
+}
+
+// BlobStore provides lockless content-addressed blob storage.
+// Operations are safe for concurrent use without external synchronization.
+type BlobStore interface {
+	// PutBlob stores content and returns hash + disk path. Lockless and idempotent.
+	PutBlob(content []byte) (hash string, diskPath string, err error)
+
+	// GetBlob retrieves content by hash.
+	GetBlob(hash string) ([]byte, error)
+
+	// HasBlob checks if blob exists.
+	HasBlob(hash string) bool
+
+	// BlobPath returns disk path for a hash.
+	BlobPath(hash string) string
 }
