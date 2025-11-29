@@ -38,18 +38,19 @@ linters:
       errorf: true
       asserts: true
       comparison: true
+  exclusions:
+    generated: lax
+    paths:
+      - vendor
+    rules:
+      - path: _test\.go
+        linters:
+          - errcheck
+      - path: examples/
+        linters:
+          - errcheck
 
 issues:
-  exclude-dirs:
-    - vendor
-  exclude-rules:
-    - path: _test\.go
-      linters:
-        - errcheck
-    - path: examples/
-      linters:
-        - errcheck
-  exclude-generated: lax
   max-same-issues: 50
 
 formatters:
