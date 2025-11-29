@@ -18,12 +18,15 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 	"github.com/google/go-containerregistry/pkg/v1/types"
 	"github.com/klauspost/compress/zstd"
-	"golang.org/x/sync/errgroup"
+	"github.com/sourcegraph/conc/pool"
 )
 
+const DefaultConcurrency = 4
+
 type OCIRemote struct {
-	ref  name.Reference
-	auth Authenticator
+	ref         name.Reference
+	auth        Authenticator
+	concurrency int
 }
 
 // NewOCIRemote creates a remote from a standard Docker ref (e.g., "ttl.sh/cache/go:main")
@@ -32,7 +35,14 @@ func NewOCIRemote(imageRef string, auth Authenticator) (*OCIRemote, error) {
 	if err != nil {
 		return nil, fmt.Errorf("invalid image ref %q: %w", imageRef, err)
 	}
-	return &OCIRemote{ref: ref, auth: auth}, nil
+	return &OCIRemote{ref: ref, auth: auth, concurrency: DefaultConcurrency}, nil
+}
+
+// SetConcurrency sets the number of parallel operations for push/pull
+func (r *OCIRemote) SetConcurrency(n int) {
+	if n > 0 {
+		r.concurrency = n
+	}
 }
 
 func (r *OCIRemote) String() string   { return r.ref.String() }
@@ -45,7 +55,7 @@ func (r *OCIRemote) WithTag(tag string) (*OCIRemote, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &OCIRemote{ref: newRef, auth: r.auth}, nil
+	return &OCIRemote{ref: newRef, auth: r.auth, concurrency: r.concurrency}, nil
 }
 
 // blobLayer implements v1.Layer with zstd compression for remote transfer
@@ -207,7 +217,7 @@ func (r *OCIRemote) buildImage(layers []v1.Layer, rootHash string, prefixes map[
 
 func (r *OCIRemote) pushImage(ctx context.Context, img v1.Image) error {
 	options := r.remoteOptions()
-	options = append(options, remote.WithJobs(4))
+	options = append(options, remote.WithJobs(r.concurrency))
 	_, err := retry(ctx, 3, func() (struct{}, error) {
 		return struct{}{}, remote.Write(r.ref, img, options...)
 	})
@@ -269,15 +279,14 @@ func (r *OCIRemote) Pull(ctx context.Context, localPrefixes map[string]PrefixInf
 
 	fmt.Fprintf(os.Stderr, "[pull] downloading %d layers in parallel\n", len(neededLayerList))
 
-	// Download in parallel
+	// Download in parallel using conc pool
 	var mu sync.Mutex
 	objects := make(map[string][]byte)
 
-	g, _ := errgroup.WithContext(ctx)
-	g.SetLimit(4) // 4 parallel downloads
+	p := pool.New().WithMaxGoroutines(r.concurrency).WithContext(ctx).WithCancelOnError()
 
 	for _, layer := range neededLayerList {
-		g.Go(func() error {
+		p.Go(func(ctx context.Context) error {
 			rc, err := layer.Uncompressed()
 			if err != nil {
 				return fmt.Errorf("read layer: %w", err)
@@ -304,7 +313,7 @@ func (r *OCIRemote) Pull(ctx context.Context, localPrefixes map[string]PrefixInf
 		})
 	}
 
-	if err := g.Wait(); err != nil {
+	if err := p.Wait(); err != nil {
 		return "", nil, nil, err
 	}
 

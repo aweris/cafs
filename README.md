@@ -92,6 +92,7 @@ Index (flat):                    Computed:
 fs, _ := cafs.Open("ttl.sh/myorg/cache:main",
     cafs.WithCacheDir("/tmp/my-cache"),     // custom cache location
     cafs.WithAutoPull(cafs.AutoPullAlways), // auto-pull on open
+    cafs.WithConcurrency(8),                // parallel operations (default: 4)
 )
 ```
 

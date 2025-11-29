@@ -19,9 +19,10 @@ type Authenticator = remote.Authenticator
 
 // Options configures a CAS store.
 type Options struct {
-	CacheDir string
-	Auth     Authenticator
-	AutoPull string
+	CacheDir    string
+	Auth        Authenticator
+	AutoPull    string
+	Concurrency int
 }
 
 // Option is a functional option for configuring CAS.
@@ -29,8 +30,9 @@ type Option func(*Options)
 
 func defaultOptions() *Options {
 	return &Options{
-		CacheDir: defaultCacheDir(),
-		AutoPull: AutoPullNever,
+		CacheDir:    defaultCacheDir(),
+		AutoPull:    AutoPullNever,
+		Concurrency: remote.DefaultConcurrency,
 	}
 }
 
@@ -47,6 +49,15 @@ func WithAuth(auth Authenticator) Option {
 // WithAutoPull enables automatic pulling from remote on Open.
 func WithAutoPull(mode string) Option {
 	return func(o *Options) { o.AutoPull = mode }
+}
+
+// WithConcurrency sets the number of parallel operations for push/pull.
+func WithConcurrency(n int) Option {
+	return func(o *Options) {
+		if n > 0 {
+			o.Concurrency = n
+		}
+	}
 }
 
 func defaultCacheDir() string {

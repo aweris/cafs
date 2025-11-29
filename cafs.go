@@ -51,6 +51,7 @@ func Open(imageRef string, opts ...Option) (FS, error) {
 	if err != nil {
 		return nil, err
 	}
+	ociRemote.SetConcurrency(options.Concurrency)
 
 	s := &CAS{
 		blobs:    &blobStore{dir: blobDir},
