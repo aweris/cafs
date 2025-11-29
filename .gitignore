@@ -31,7 +31,13 @@ go.work.sum
 .tmp/
 .cafs/
 
+# example binaries
+examples/*/quickstart
+examples/*/directories
+examples/*/remote
+examples/*/gocacheprog
+
 # Editor/IDE
 .claude/
-# .idea/
-# .vscode/
+.idea/
+.vscode/

@@ -1,22 +1,33 @@
-# CAFS Examples
+# Examples
 
 ## [01-quickstart](./01-quickstart)
-Write, read, snapshot. 5 lines of code.
+
+Basic CAS operations: store, index, lookup.
 
 ```bash
 cd 01-quickstart && go run .
 ```
 
-## [02-distributed](./02-distributed)
-Multi-machine collaboration. Machine A creates, B modifies, C pulls read-only with eager prefetch. Shows auto-pull, content mixing, and prefetching.
+## [02-directories](./02-directories)
+
+Directory hashing and change detection.
 
 ```bash
-cd 02-distributed && go run .
+cd 02-directories && go run .
 ```
 
-## [03-nested-dirs](./03-nested-dirs)
-Nested directories made simple. Create deep paths, list folders, walk trees. Demonstrates eager metadata loading.
+## [03-remote](./03-remote)
+
+Push and pull to OCI registries.
 
 ```bash
-cd 03-nested-dirs && go run .
+cd 03-remote && go run .
+```
+
+## [04-gocacheprog](./04-gocacheprog)
+
+GOCACHEPROG implementation for Go build cache.
+
+```bash
+cd 04-gocacheprog && go build -o gocacheprog .
 ```

@@ -1,34 +1,37 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"log"
-	"time"
 
 	"github.com/aweris/cafs"
 )
 
 func main() {
-	namespace := fmt.Sprintf("test-%d/quickstart:main", time.Now().Unix())
-	fs, err := cafs.Open(namespace, cafs.WithRegistry("ttl.sh"))
+	fs, err := cafs.Open("demo/quickstart:main", cafs.WithCacheDir(".cafs"))
 	if err != nil {
 		log.Fatal(err)
 	}
+	defer fs.Close()
 
-	if err := fs.WriteFile("/hello.txt", []byte("Hello, CAFS!"), 0644); err != nil {
-		log.Fatal(err)
-	}
-
-	data, err := fs.ReadFile("/hello.txt")
+	// Store content → get digest
+	digest, err := fs.Blobs().Put([]byte("Hello, CAFS!"))
 	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Printf("Read: %s\n", data)
+	fmt.Printf("Stored: %s\n", digest[:20])
 
-	hash, err := fs.Push(context.Background())
-	if err != nil {
-		log.Fatal(err)
-	}
-	fmt.Printf("Snapshot: %s\n", hash)
+	// Index by key
+	fs.Index().Set("greeting", digest)
+
+	// Lookup by key
+	found, _ := fs.Index().Get("greeting")
+	fmt.Printf("Lookup: %s\n", found[:20])
+
+	// Load content
+	data, _ := fs.Blobs().Get(found)
+	fmt.Printf("Content: %s\n", data)
+
+	// Root hash changes when index changes
+	fmt.Printf("Root: %s\n", fs.Root()[:20])
 }

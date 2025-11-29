@@ -1,25 +1,72 @@
-# CAFS
+# cafs
 
-> **⚠️ Early Development - Expect Breaking Changes**
->
-> Rough MVP implementation. APIs unstable, architecture shifting, not production-ready.
+Content-Addressable File System with OCI registry sync.
 
-Content-Addressed Filesystem with OCI Backend - a Go library that makes content-addressed storage feel like a regular filesystem.
+Store files by content hash. Index them by any key. Compare directories instantly. Sync anywhere.
 
-## Core Idea
+## Install
 
-```go
-fs, _ := cafs.Open("myorg/project:main", cafs.WithRegistry("ttl.sh"))
-fs.WriteFile("/config.json", data, 0644)
-hash, _ := fs.Push(ctx)
+```bash
+go get github.com/aweris/cafs
 ```
 
-Files stored content-addressed, synced to OCI registries, accessed via familiar filesystem operations.
+## Core Concepts
 
-## Status
+**Blobs** — Content-addressed storage. Same content = same digest = stored once.
 
-**Working:** File ops (read/write), streaming, OCI push/pull, local storage, ref persistence
+**Index** — Maps keys to digests. Like git's index, but flat.
 
-**Not Working:** Remove/rename ops, file writes, many filesystem methods
+**Merkle** — Directory hashes computed on-demand from flat index:
 
-Inspired by: Afero, Git, OCI, IPFS
+```
+Index (flat):                    Computed:
+┌─────────────────────────┐     ┌─────────────────────────┐
+│ foo/bar/a.go → abc123   │     │ foo/bar/   → hash(...)  │
+│ foo/bar/b.go → def456   │ ──▶ │ foo/       → hash(...)  │
+│ foo/x.go     → ghi789   │     │ (root)     → hash(...)  │
+└─────────────────────────┘     └─────────────────────────┘
+```
+
+**Sync** — Push/pull to OCI registries. Blobs as layers, index as manifest.
+
+## Example
+
+```go
+// Standard Docker image ref format
+fs, _ := cafs.Open("ttl.sh/myorg/project:main")
+
+// Store content → get digest
+digest, _ := fs.Blobs().Put([]byte("hello world"))
+
+// Index by key
+fs.Index().Set("config.json", digest)
+
+// Retrieve
+d, _ := fs.Index().Get("config.json")
+data, _ := fs.Blobs().Get(d)
+
+// Compare directories
+if fs.Index().Hash("src/") != lastKnownHash {
+    // something changed
+}
+
+// Persistence
+fs.Sync()          // persist index locally
+fs.Close()         // same as Sync()
+
+// Remote (zstd compressed, incremental sync)
+fs.Push(ctx)                  // push to current tag
+fs.Push(ctx, "v1", "latest")  // push to multiple tags
+fs.Pull(ctx)                  // pull from current ref
+```
+
+## Why
+
+- **Deduplication** — Same content stored once, referenced many times
+- **Instant diff** — Compare directories by hash, not file-by-file
+- **Portable** — Push/pull snapshots to any OCI registry
+- **Concurrent** — All operations are lockless and thread-safe
+
+## License
+
+Apache 2.0

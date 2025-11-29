@@ -1,8 +1,8 @@
-module example/distributed
+module example/merkle
 
 go 1.25.4
 
-require github.com/aweris/cafs v0.0.0
+require github.com/aweris/cafs v0.1.0
 
 require (
 	github.com/containerd/stargz-snapshotter/estargz v0.16.3 // indirect

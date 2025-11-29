@@ -1,16 +1,17 @@
-# Quickstart Example
+# Quickstart
 
-Basic CAFS usage: write, read, and push.
+Basic cafs operations in ~20 lines.
 
 ## Run
 
 ```bash
-go run main.go
+go run .
 ```
 
-## What it demonstrates
+## What it shows
 
-- Opening a workspace
-- Writing a file
-- Reading a file
-- Pushing changes to create a snapshot
+- `Blobs().Put()` — Store content, get digest
+- `Index().Set()` — Map key to digest
+- `Index().Get()` — Lookup digest by key
+- `Blobs().Get()` — Load content by digest
+- `Push()` — Sync to OCI registry

@@ -3,10 +3,12 @@ package remote
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
+	"os"
+	"sync"
+	"time"
 
 	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/google/go-containerregistry/pkg/name"
@@ -15,96 +17,165 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/mutate"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 	"github.com/google/go-containerregistry/pkg/v1/types"
+	"github.com/klauspost/compress/zstd"
+	"golang.org/x/sync/errgroup"
 )
 
 type OCIRemote struct {
-	registry  string // e.g., "registry.io"
-	namespace string // e.g., "myorg/project"
-	ref       string // e.g., "main"
-	auth      Authenticator
+	ref  name.Reference
+	auth Authenticator
 }
 
-func NewOCIRemote(registry, namespace, ref string, auth Authenticator) *OCIRemote {
-	return &OCIRemote{
-		registry:  registry,
-		namespace: namespace,
-		ref:       ref,
-		auth:      auth,
+// NewOCIRemote creates a remote from a standard Docker ref (e.g., "ttl.sh/cache/go:main")
+func NewOCIRemote(imageRef string, auth Authenticator) (*OCIRemote, error) {
+	ref, err := name.ParseReference(imageRef, name.WithDefaultTag("latest"))
+	if err != nil {
+		return nil, fmt.Errorf("invalid image ref %q: %w", imageRef, err)
 	}
+	return &OCIRemote{ref: ref, auth: auth}, nil
 }
 
-// blobLayer implements v1.Layer for raw blob content.
+func (r *OCIRemote) String() string   { return r.ref.String() }
+func (r *OCIRemote) Registry() string { return r.ref.Context().RegistryStr() }
+func (r *OCIRemote) Tag() string      { return r.ref.Identifier() }
+
+// WithTag returns a new OCIRemote with a different tag
+func (r *OCIRemote) WithTag(tag string) (*OCIRemote, error) {
+	newRef, err := name.NewTag(r.ref.Context().String()+":"+tag, name.WithDefaultTag("latest"))
+	if err != nil {
+		return nil, err
+	}
+	return &OCIRemote{ref: newRef, auth: r.auth}, nil
+}
+
+// blobLayer implements v1.Layer with zstd compression for remote transfer
 type blobLayer struct {
-	content   []byte
-	mediaType types.MediaType
+	compressed   []byte
+	uncompressed []byte
+}
+
+var zstdEncoder, _ = zstd.NewWriter(nil, zstd.WithEncoderLevel(zstd.SpeedDefault))
+
+func newBlobLayer(data []byte) *blobLayer {
+	return &blobLayer{
+		compressed:   zstdEncoder.EncodeAll(data, nil),
+		uncompressed: data,
+	}
 }
 
 func (l *blobLayer) Digest() (v1.Hash, error) {
-	hash, _, err := v1.SHA256(bytes.NewReader(l.content))
-	return hash, err
+	h, _, err := v1.SHA256(bytes.NewReader(l.compressed))
+	return h, err
 }
 
 func (l *blobLayer) DiffID() (v1.Hash, error) {
-	return l.Digest()
+	h, _, err := v1.SHA256(bytes.NewReader(l.uncompressed))
+	return h, err
 }
 
-func (l *blobLayer) Compressed() (io.ReadCloser, error) {
-	return io.NopCloser(bytes.NewReader(l.content)), nil
-}
+func (l *blobLayer) Compressed() (io.ReadCloser, error)   { return io.NopCloser(bytes.NewReader(l.compressed)), nil }
+func (l *blobLayer) Uncompressed() (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(l.uncompressed)), nil }
+func (l *blobLayer) Size() (int64, error)                 { return int64(len(l.compressed)), nil }
+func (l *blobLayer) MediaType() (types.MediaType, error)  { return types.OCILayerZStd, nil }
 
-func (l *blobLayer) Uncompressed() (io.ReadCloser, error) {
-	return io.NopCloser(bytes.NewReader(l.content)), nil
-}
+// Push uploads blobs incrementally based on prefix hashes
+func (r *OCIRemote) Push(ctx context.Context, rootHash string, objects map[string][]byte, localPrefixes map[string]PrefixInfo) (map[string]PrefixInfo, error) {
+	// Group blobs by prefix
+	byPrefix := GroupByPrefix(objects)
 
-func (l *blobLayer) Size() (int64, error) {
-	return int64(len(l.content)), nil
-}
+	fmt.Fprintf(os.Stderr, "[push] %d blobs across %d prefixes\n", len(objects), len(byPrefix))
 
-func (l *blobLayer) MediaType() (types.MediaType, error) {
-	return l.mediaType, nil
-}
+	// Compute current prefix hashes
+	currentHashes := make(map[string]string)
+	for prefix, blobs := range byPrefix {
+		currentHashes[prefix] = PrefixHash(blobs)
+	}
 
-func (r *OCIRemote) Push(ctx context.Context, rootHash string, objects map[string][]byte) error {
-	repoName := fmt.Sprintf("%s/%s", r.registry, r.namespace)
-
-	layers := make([]v1.Layer, 0, len(objects))
-	for _, data := range objects {
-		layer := &blobLayer{
-			content:   data,
-			mediaType: types.OCILayer,
+	// Find changed prefixes
+	var changedPrefixes []string
+	for prefix, hash := range currentHashes {
+		if local, ok := localPrefixes[prefix]; !ok || local.Hash != hash {
+			changedPrefixes = append(changedPrefixes, prefix)
 		}
+	}
+
+	fmt.Fprintf(os.Stderr, "[push] %d prefixes changed (of %d local)\n", len(changedPrefixes), len(localPrefixes))
+
+	// Build result with existing layer refs for unchanged prefixes
+	newPrefixes := make(map[string]PrefixInfo)
+	for prefix, info := range localPrefixes {
+		if _, exists := currentHashes[prefix]; !exists {
+			continue // prefix no longer exists
+		}
+		newPrefixes[prefix] = info
+	}
+
+	// If nothing changed, just update manifest
+	if len(changedPrefixes) == 0 {
+		fmt.Fprintf(os.Stderr, "[push] no changes, updating manifest only\n")
+		return newPrefixes, r.pushManifest(ctx, rootHash, newPrefixes)
+	}
+
+	// Collect blobs from changed prefixes
+	changedByPrefix := make(map[string]map[string][]byte)
+	for _, prefix := range changedPrefixes {
+		changedByPrefix[prefix] = byPrefix[prefix]
+	}
+
+	// Build layer plan for changed prefixes
+	sizes := CalculatePrefixSizes(changedByPrefix)
+	layerPlan := BuildLayerPlan(sizes)
+
+	fmt.Fprintf(os.Stderr, "[push] packing into %d layers\n", len(layerPlan))
+
+	// Create layers
+	var layers []v1.Layer
+	var totalRaw, totalCompressed int64
+	for _, prefixGroup := range layerPlan {
+		blobs := CollectPrefixBlobs(prefixGroup, changedByPrefix)
+		layerData := PackLayer(blobs)
+		layer := newBlobLayer(layerData)
+		digest, _ := layer.Digest()
+		totalRaw += int64(len(layerData))
+		totalCompressed += int64(len(layer.compressed))
+
 		layers = append(layers, layer)
-	}
-
-	img, err := r.buildImage(layers, rootHash)
-	if err != nil {
-		return fmt.Errorf("failed to build image: %w", err)
-	}
-
-	tag, err := name.NewTag(fmt.Sprintf("%s:%s", repoName, r.ref))
-	if err != nil {
-		return fmt.Errorf("invalid tag: %w", err)
-	}
-
-	options := []remote.Option{}
-	if r.auth != nil {
-		username, password, err := r.auth.Authenticate(r.registry)
-		if err == nil && username != "" {
-			options = append(options, remote.WithAuth(&authn.Basic{
-				Username: username,
-				Password: password,
-			}))
+		for _, prefix := range prefixGroup {
+			newPrefixes[prefix] = PrefixInfo{
+				Hash:  currentHashes[prefix],
+				Layer: digest.String(),
+			}
 		}
 	}
 
-	if err := remote.Write(tag, img, options...); err != nil {
-		return fmt.Errorf("failed to push image: %w", err)
+	ratio := float64(totalCompressed) / float64(totalRaw) * 100
+	fmt.Fprintf(os.Stderr, "[push] uploading %d layers (%.1fMB → %.1fMB, %.0f%%)\n",
+		len(layers), float64(totalRaw)/(1024*1024), float64(totalCompressed)/(1024*1024), ratio)
+
+	// Build and push image
+	img, err := r.buildImage(layers, rootHash, newPrefixes)
+	if err != nil {
+		return nil, fmt.Errorf("build image: %w", err)
 	}
 
-	return nil
+	if err := r.pushImage(ctx, img); err != nil {
+		return nil, fmt.Errorf("push image: %w", err)
+	}
+
+	fmt.Fprintf(os.Stderr, "[push] done\n")
+	return newPrefixes, nil
 }
 
-func (r *OCIRemote) buildImage(layers []v1.Layer, rootHash string) (v1.Image, error) {
+// pushManifest pushes just the manifest without new layers
+func (r *OCIRemote) pushManifest(ctx context.Context, rootHash string, prefixes map[string]PrefixInfo) error {
+	img, err := r.buildImage(nil, rootHash, prefixes)
+	if err != nil {
+		return err
+	}
+	return r.pushImage(ctx, img)
+}
+
+func (r *OCIRemote) buildImage(layers []v1.Layer, rootHash string, prefixes map[string]PrefixInfo) (v1.Image, error) {
 	img := empty.Image
 
 	if len(layers) > 0 {
@@ -120,28 +191,125 @@ func (r *OCIRemote) buildImage(layers []v1.Layer, rootHash string) (v1.Image, er
 		return nil, err
 	}
 
+	prefixJSON, _ := json.Marshal(prefixes)
+
 	cfg.Config.Labels = map[string]string{
-		"dev.cafs.root.hash": rootHash,
+		"dev.cafs.root":     rootHash,
+		"dev.cafs.prefixes": string(prefixJSON),
 	}
 
-	img, err = mutate.ConfigFile(img, cfg)
-	if err != nil {
-		return nil, err
-	}
-
-	return img, nil
+	return mutate.ConfigFile(img, cfg)
 }
 
-func (r *OCIRemote) Pull(ctx context.Context) (string, map[string][]byte, error) {
-	repoName := fmt.Sprintf("%s/%s", r.registry, r.namespace)
-	tag, err := name.NewTag(fmt.Sprintf("%s:%s", repoName, r.ref))
+func (r *OCIRemote) pushImage(ctx context.Context, img v1.Image) error {
+	options := r.remoteOptions()
+	options = append(options, remote.WithJobs(4))
+	_, err := retry(ctx, 3, func() (struct{}, error) {
+		return struct{}{}, remote.Write(r.ref, img, options...)
+	})
+	return err
+}
+
+// Pull downloads blobs incrementally based on prefix hashes
+func (r *OCIRemote) Pull(ctx context.Context, localPrefixes map[string]PrefixInfo) (string, map[string][]byte, map[string]PrefixInfo, error) {
+	img, err := retry(ctx, 3, func() (v1.Image, error) {
+		return remote.Image(r.ref, r.remoteOptions()...)
+	})
 	if err != nil {
-		return "", nil, fmt.Errorf("invalid tag: %w", err)
+		return "", nil, nil, fmt.Errorf("fetch image: %w", err)
 	}
 
-	options := []remote.Option{}
+	cfg, err := img.ConfigFile()
+	if err != nil {
+		return "", nil, nil, fmt.Errorf("get config: %w", err)
+	}
+
+	rootHash := cfg.Config.Labels["dev.cafs.root"]
+	if rootHash == "" {
+		return "", nil, nil, fmt.Errorf("missing dev.cafs.root label")
+	}
+
+	var remotePrefixes map[string]PrefixInfo
+	if prefixJSON := cfg.Config.Labels["dev.cafs.prefixes"]; prefixJSON != "" {
+		if err := json.Unmarshal([]byte(prefixJSON), &remotePrefixes); err != nil {
+			return "", nil, nil, fmt.Errorf("parse prefixes: %w", err)
+		}
+	}
+
+	// Find layers we need to download
+	neededLayers := make(map[string]bool)
+	for prefix, remoteInfo := range remotePrefixes {
+		localInfo, exists := localPrefixes[prefix]
+		if !exists || localInfo.Hash != remoteInfo.Hash {
+			neededLayers[remoteInfo.Layer] = true
+		}
+	}
+
+	// Download needed layers in parallel
+	layers, err := img.Layers()
+	if err != nil {
+		return "", nil, nil, fmt.Errorf("get layers: %w", err)
+	}
+
+	// Filter to needed layers
+	var neededLayerList []v1.Layer
+	for _, layer := range layers {
+		digest, err := layer.Digest()
+		if err != nil {
+			continue
+		}
+		if neededLayers[digest.String()] {
+			neededLayerList = append(neededLayerList, layer)
+		}
+	}
+
+	fmt.Fprintf(os.Stderr, "[pull] downloading %d layers in parallel\n", len(neededLayerList))
+
+	// Download in parallel
+	var mu sync.Mutex
+	objects := make(map[string][]byte)
+
+	g, _ := errgroup.WithContext(ctx)
+	g.SetLimit(4) // 4 parallel downloads
+
+	for _, layer := range neededLayerList {
+		g.Go(func() error {
+			rc, err := layer.Uncompressed()
+			if err != nil {
+				return fmt.Errorf("read layer: %w", err)
+			}
+			data, err := io.ReadAll(rc)
+			rc.Close()
+			if err != nil {
+				return fmt.Errorf("read layer: %w", err)
+			}
+
+			blobs, err := UnpackLayer(data)
+			if err != nil {
+				return fmt.Errorf("unpack layer: %w", err)
+			}
+
+			mu.Lock()
+			for k, v := range blobs {
+				objects[k] = v
+			}
+			mu.Unlock()
+			return nil
+		})
+	}
+
+	if err := g.Wait(); err != nil {
+		return "", nil, nil, err
+	}
+
+	fmt.Fprintf(os.Stderr, "[pull] done, %d blobs received\n", len(objects))
+	return rootHash, objects, remotePrefixes, nil
+}
+
+func (r *OCIRemote) remoteOptions() []remote.Option {
+	var options []remote.Option
 	if r.auth != nil {
-		username, password, err := r.auth.Authenticate(r.registry)
+		username, password, err := r.auth.Authenticate(r.Registry())
 		if err == nil && username != "" {
 			options = append(options, remote.WithAuth(&authn.Basic{
 				Username: username,
@@ -149,50 +317,26 @@ func (r *OCIRemote) Pull(ctx context.Context) (string, map[string][]byte, error)
 			}))
 		}
 	}
-
-	img, err := remote.Image(tag, options...)
-	if err != nil {
-		return "", nil, fmt.Errorf("failed to fetch image: %w", err)
-	}
-
-	cfg, err := img.ConfigFile()
-	if err != nil {
-		return "", nil, fmt.Errorf("failed to get config: %w", err)
-	}
-
-	rootHash, ok := cfg.Config.Labels["dev.cafs.root.hash"]
-	if !ok {
-		return "", nil, fmt.Errorf("missing dev.cafs.root.hash label")
-	}
-
-	layers, err := img.Layers()
-	if err != nil {
-		return "", nil, fmt.Errorf("failed to get layers: %w", err)
-	}
-
-	objects := make(map[string][]byte)
-	for _, layer := range layers {
-		rc, err := layer.Uncompressed()
-		if err != nil {
-			return "", nil, fmt.Errorf("failed to read layer: %w", err)
-		}
-
-		data, err := io.ReadAll(rc)
-		rc.Close()
-		if err != nil {
-			return "", nil, fmt.Errorf("failed to read layer data: %w", err)
-		}
-
-		hash := sha256.Sum256(data)
-		hashStr := hex.EncodeToString(hash[:])
-
-		objects[hashStr] = data
-	}
-
-	return rootHash, objects, nil
+	return options
 }
 
-// Not implemented - Pull() fetches by tag directly.
-func (r *OCIRemote) GetRef(ctx context.Context) (string, error) {
-	return "", fmt.Errorf("not implemented")
+func retry[T any](ctx context.Context, maxAttempts int, fn func() (T, error)) (T, error) {
+	var zero T
+	var lastErr error
+	for i := range maxAttempts {
+		result, err := fn()
+		if err == nil {
+			return result, nil
+		}
+		lastErr = err
+		if i < maxAttempts-1 {
+			delay := time.Duration(1<<i) * 500 * time.Millisecond // 500ms, 1s, 2s, 4s...
+			select {
+			case <-ctx.Done():
+				return zero, ctx.Err()
+			case <-time.After(delay):
+			}
+		}
+	}
+	return zero, lastErr
 }
