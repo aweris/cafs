@@ -13,10 +13,10 @@ type FS interface {
 	Blobs() BlobStore
 	Index() Index
 
-	Sync() error                                  // persist index locally
+	Sync() error                                    // persist index locally
 	Push(ctx context.Context, tags ...string) error // push to remote tags (default: current tag)
-	Pull(ctx context.Context) error               // pull from remote
-	Close() error                                 // calls Sync()
+	Pull(ctx context.Context) error                 // pull from remote
+	Close() error                                   // calls Sync()
 
 	Root() Digest
 	Dirty() bool

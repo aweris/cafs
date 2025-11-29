@@ -6,7 +6,7 @@
 //
 // Basic usage:
 //
-//	fs, _ := cafs.Open("myorg/cache:main", cafs.WithRegistry("ttl.sh"))
+//	fs, _ := cafs.Open("ttl.sh/myorg/cache:main")
 //
 //	// Store content
 //	digest, _ := fs.Blobs().Put(data)

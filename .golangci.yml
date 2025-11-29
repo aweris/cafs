@@ -1,0 +1,58 @@
+version: "2"
+
+linters:
+  default: standard
+  enable:
+    - bodyclose
+    - copyloopvar
+    - errname
+    - errorlint
+    - fatcontext
+    - gocritic
+    - nilerr
+    - noctx
+    - prealloc
+    - predeclared
+    - unconvert
+    - unparam
+    - usestdlibvars
+    - whitespace
+  settings:
+    errcheck:
+      exclude-functions:
+        - io.Closer.Close
+        - (*os.File).Close
+        - (*github.com/aweris/cafs.CAS).Close
+        - github.com/spf13/viper.BindPFlag
+        - github.com/spf13/viper.ReadInConfig
+        - encoding/binary.Write
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - performance
+      disabled-checks:
+        - hugeParam
+        - rangeValCopy
+        - ifElseChain
+    errorlint:
+      errorf: true
+      asserts: true
+      comparison: true
+
+issues:
+  exclude-dirs:
+    - vendor
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - errcheck
+    - path: examples/
+      linters:
+        - errcheck
+  exclude-generated: lax
+  max-same-issues: 50
+
+formatters:
+  enable:
+    - gofmt
+    - goimports

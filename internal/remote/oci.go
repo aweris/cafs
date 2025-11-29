@@ -73,10 +73,14 @@ func (l *blobLayer) DiffID() (v1.Hash, error) {
 	return h, err
 }
 
-func (l *blobLayer) Compressed() (io.ReadCloser, error)   { return io.NopCloser(bytes.NewReader(l.compressed)), nil }
-func (l *blobLayer) Uncompressed() (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(l.uncompressed)), nil }
-func (l *blobLayer) Size() (int64, error)                 { return int64(len(l.compressed)), nil }
-func (l *blobLayer) MediaType() (types.MediaType, error)  { return types.OCILayerZStd, nil }
+func (l *blobLayer) Compressed() (io.ReadCloser, error) {
+	return io.NopCloser(bytes.NewReader(l.compressed)), nil
+}
+func (l *blobLayer) Uncompressed() (io.ReadCloser, error) {
+	return io.NopCloser(bytes.NewReader(l.uncompressed)), nil
+}
+func (l *blobLayer) Size() (int64, error)                { return int64(len(l.compressed)), nil }
+func (l *blobLayer) MediaType() (types.MediaType, error) { return types.OCILayerZStd, nil }
 
 // Push uploads blobs incrementally based on prefix hashes
 func (r *OCIRemote) Push(ctx context.Context, rootHash string, objects map[string][]byte, localPrefixes map[string]PrefixInfo) (map[string]PrefixInfo, error) {
@@ -129,7 +133,7 @@ func (r *OCIRemote) Push(ctx context.Context, rootHash string, objects map[strin
 	fmt.Fprintf(os.Stderr, "[push] packing into %d layers\n", len(layerPlan))
 
 	// Create layers
-	var layers []v1.Layer
+	layers := make([]v1.Layer, 0, len(layerPlan))
 	var totalRaw, totalCompressed int64
 	for _, prefixGroup := range layerPlan {
 		blobs := CollectPrefixBlobs(prefixGroup, changedByPrefix)
@@ -279,7 +283,9 @@ func (r *OCIRemote) Pull(ctx context.Context, localPrefixes map[string]PrefixInf
 				return fmt.Errorf("read layer: %w", err)
 			}
 			data, err := io.ReadAll(rc)
-			rc.Close()
+			if cerr := rc.Close(); cerr != nil {
+				return fmt.Errorf("close layer: %w", cerr)
+			}
 			if err != nil {
 				return fmt.Errorf("read layer: %w", err)
 			}
@@ -307,17 +313,16 @@ func (r *OCIRemote) Pull(ctx context.Context, localPrefixes map[string]PrefixInf
 }
 
 func (r *OCIRemote) remoteOptions() []remote.Option {
-	var options []remote.Option
 	if r.auth != nil {
 		username, password, err := r.auth.Authenticate(r.Registry())
 		if err == nil && username != "" {
-			options = append(options, remote.WithAuth(&authn.Basic{
+			return []remote.Option{remote.WithAuth(&authn.Basic{
 				Username: username,
 				Password: password,
-			}))
+			})}
 		}
 	}
-	return options
+	return []remote.Option{remote.WithAuthFromKeychain(authn.DefaultKeychain)}
 }
 
 func retry[T any](ctx context.Context, maxAttempts int, fn func() (T, error)) (T, error) {

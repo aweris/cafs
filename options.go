@@ -7,6 +7,13 @@ import (
 	"github.com/aweris/cafs/internal/remote"
 )
 
+// AutoPull modes
+const (
+	AutoPullNever   = "never"
+	AutoPullAlways  = "always"
+	AutoPullMissing = "missing"
+)
+
 // Authenticator provides credentials for remote registries.
 type Authenticator = remote.Authenticator
 
@@ -23,7 +30,7 @@ type Option func(*Options)
 func defaultOptions() *Options {
 	return &Options{
 		CacheDir: defaultCacheDir(),
-		AutoPull: "never",
+		AutoPull: AutoPullNever,
 	}
 }
 

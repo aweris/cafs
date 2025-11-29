@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -43,28 +42,14 @@ type Response struct {
 const metaPrefix = "meta:"
 
 func main() {
-	// Full image ref, e.g., "ttl.sh/gocache/default:main" or "gocache/default:main" for local
 	imageRef := envOr("GOCACHEPROG_REF", "gocache/default:main")
 	cacheDir := envOr("GOCACHEPROG_DIR", defaultCacheDir())
-	pull := envBool("GOCACHEPROG_PULL")
-	push := envBool("GOCACHEPROG_PUSH")
 
-	opts := []cafs.Option{cafs.WithCacheDir(cacheDir)}
-	if pull {
-		opts = append(opts, cafs.WithAutoPull("always"))
-	}
-
-	fs, err := cafs.Open(imageRef, opts...)
+	fs, err := cafs.Open(imageRef, cafs.WithCacheDir(cacheDir))
 	if err != nil {
 		fatal(err)
 	}
 	defer fs.Close()
-
-	if push {
-		defer func() {
-			fs.Push(context.Background()) // pushes to current tag
-		}()
-	}
 
 	if err := run(os.Stdin, os.Stdout, fs); err != nil {
 		fatal(err)
@@ -191,11 +176,6 @@ func envOr(key, def string) string {
 		return v
 	}
 	return def
-}
-
-func envBool(key string) bool {
-	v := os.Getenv(key)
-	return v == "1" || v == "true"
 }
 
 func defaultCacheDir() string {

@@ -63,7 +63,7 @@ func Open(imageRef string, opts ...Option) (FS, error) {
 		s.rootHash = s.idx.Hash("")
 	}
 
-	if options.AutoPull == "always" || options.AutoPull == "missing" {
+	if options.AutoPull == AutoPullAlways || options.AutoPull == AutoPullMissing {
 		_ = s.Pull(context.Background())
 	}
 

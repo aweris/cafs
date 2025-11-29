@@ -1,6 +1,8 @@
 # gocacheprog
 
-GOCACHEPROG implementation using CAFS.
+GOCACHEPROG implementation using CAFS (local only).
+
+Use `cafs` CLI for remote sync operations.
 
 ## Build
 
@@ -11,23 +13,30 @@ go build -o gocacheprog .
 ## Usage
 
 ```bash
-# Basic (local only)
+# Local only
 export GOCACHEPROG=$PWD/gocacheprog
 go build ./...
 
-# With remote sync (standard Docker image ref format)
+# With remote sync (use cafs CLI)
 export GOCACHEPROG=$PWD/gocacheprog
 export GOCACHEPROG_REF=ttl.sh/myorg/gocache:main
-export GOCACHEPROG_PULL=true
-export GOCACHEPROG_PUSH=true
-go build ./...
+
+cafs pull $GOCACHEPROG_REF     # warm up cache
+go build ./...                  # fast local builds
+cafs push $GOCACHEPROG_REF     # sync back
 ```
 
 ## Environment Variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `GOCACHEPROG_REF` | `gocache/default:main` | Full image ref (registry/repo:tag) |
-| `GOCACHEPROG_PULL` | `false` | Pull on start |
-| `GOCACHEPROG_PUSH` | `false` | Push on close |
+| `GOCACHEPROG_REF` | `gocache/default:main` | Namespace ref |
 | `GOCACHEPROG_DIR` | `~/.cache/cafs` | Local storage |
+
+## Demo
+
+Run the full workflow demo:
+
+```bash
+./demo.sh
+```

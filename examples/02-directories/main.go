@@ -15,10 +15,10 @@ func main() {
 
 	// Store some files in a directory structure
 	files := map[string]string{
-		"src/main.go":     "package main\n\nfunc main() {}\n",
-		"src/util.go":     "package main\n\nfunc helper() {}\n",
-		"src/lib/foo.go":  "package lib\n\nfunc Foo() {}\n",
-		"src/lib/bar.go":  "package lib\n\nfunc Bar() {}\n",
+		"src/main.go":        "package main\n\nfunc main() {}\n",
+		"src/util.go":        "package main\n\nfunc helper() {}\n",
+		"src/lib/foo.go":     "package lib\n\nfunc Foo() {}\n",
+		"src/lib/bar.go":     "package lib\n\nfunc Bar() {}\n",
 		"tests/main_test.go": "package main\n\nfunc TestMain() {}\n",
 	}
 
