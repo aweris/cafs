@@ -37,8 +37,8 @@ func runList(cmd *cobra.Command, args []string) (err error) {
 	}()
 
 	count := 0
-	for key, digest := range fs.Index().List(prefix) {
-		fmt.Printf("%s\t%s\n", key, digest)
+	for key, info := range fs.List(prefix) {
+		fmt.Printf("%s\t%s\t%d\n", key, info.Digest, info.Size)
 		count++
 	}
 

@@ -4,11 +4,9 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/aweris/cafs"
 )
@@ -39,7 +37,9 @@ type Response struct {
 	KnownCommands []Cmd  `json:"KnownCommands,omitempty"`
 }
 
-const metaPrefix = "meta:"
+type cacheMeta struct {
+	OutputID string `json:"o" mapstructure:"o"`
+}
 
 func main() {
 	imageRef := envOr("GOCACHEPROG_REF", "gocache/default:main")
@@ -111,35 +111,26 @@ func handle(req Request, body []byte, fs cafs.FS) Response {
 func handleGet(req Request, fs cafs.FS) Response {
 	actionID := hex.EncodeToString(req.ActionID)
 
-	meta, ok := fs.Index().Get(actionID)
+	info, ok := fs.Stat(actionID)
 	if !ok {
 		return Response{ID: req.ID, Miss: true}
 	}
 
-	// Parse meta:outputID:bodyDigest:size
-	metaStr := string(meta)
-	if !strings.HasPrefix(metaStr, metaPrefix) {
-		return Response{ID: req.ID, Miss: true}
-	}
-	parts := strings.SplitN(metaStr[len(metaPrefix):], ":", 3)
-	if len(parts) != 3 {
+	var meta cacheMeta
+	if err := info.DecodeMeta(&meta); err != nil {
 		return Response{ID: req.ID, Miss: true}
 	}
 
-	outputIDHex, bodyDigestStr := parts[0], parts[1]+":"+parts[2][:64]
-	bodyDigest := cafs.Digest(bodyDigestStr)
-
-	size, exists := fs.Blobs().Stat(bodyDigest)
-	if !exists {
+	outputID, err := hex.DecodeString(meta.OutputID)
+	if err != nil {
 		return Response{ID: req.ID, Miss: true}
 	}
 
-	outputID, _ := hex.DecodeString(outputIDHex)
 	return Response{
 		ID:       req.ID,
 		OutputID: outputID,
-		DiskPath: fs.Blobs().Path(bodyDigest),
-		Size:     size,
+		DiskPath: fs.Path(info.Digest),
+		Size:     info.Size,
 	}
 }
 
@@ -147,27 +138,16 @@ func handlePut(req Request, body []byte, fs cafs.FS) Response {
 	actionID := hex.EncodeToString(req.ActionID)
 	outputID := hex.EncodeToString(req.OutputID)
 
-	var bodyDigest cafs.Digest
-	var err error
-
-	if len(body) > 0 {
-		bodyDigest, err = fs.Blobs().Put(body)
-		if err != nil {
-			return Response{ID: req.ID, Err: err.Error()}
-		}
-	} else {
-		bodyDigest = cafs.Digest("sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
-		fs.Blobs().Put([]byte{})
+	meta := cacheMeta{OutputID: outputID}
+	if err := fs.Put(actionID, body, cafs.WithMeta(meta)); err != nil {
+		return Response{ID: req.ID, Err: err.Error()}
 	}
 
-	// Store meta directly in index: meta:outputID:bodyDigest
-	meta := cafs.Digest(fmt.Sprintf("%s%s:%s", metaPrefix, outputID, bodyDigest))
-	fs.Index().Set(actionID, meta)
-
+	info, _ := fs.Stat(actionID)
 	return Response{
 		ID:       req.ID,
-		DiskPath: fs.Blobs().Path(bodyDigest),
-		Size:     int64(len(body)),
+		DiskPath: fs.Path(info.Digest),
+		Size:     info.Size,
 	}
 }
 

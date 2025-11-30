@@ -14,24 +14,21 @@ func main() {
 	}
 	defer fs.Close()
 
-	// Store content → get digest
-	digest, err := fs.Blobs().Put([]byte("Hello, CAFS!"))
-	if err != nil {
+	// Store content at key
+	if err := fs.Put("greeting", []byte("Hello, CAFS!")); err != nil {
 		log.Fatal(err)
 	}
-	fmt.Printf("Stored: %s\n", digest[:20])
 
-	// Index by key
-	fs.Index().Set("greeting", digest)
+	// Get info about the entry
+	info, ok := fs.Stat("greeting")
+	if ok {
+		fmt.Printf("Stored: %s (size: %d)\n", info.Digest[:20], info.Size)
+	}
 
-	// Lookup by key
-	found, _ := fs.Index().Get("greeting")
-	fmt.Printf("Lookup: %s\n", found[:20])
-
-	// Load content
-	data, _ := fs.Blobs().Get(found)
+	// Load content by key
+	data, _ := fs.Get("greeting")
 	fmt.Printf("Content: %s\n", data)
 
-	// Root hash changes when index changes
+	// Root hash changes when entries change
 	fmt.Printf("Root: %s\n", fs.Root()[:20])
 }

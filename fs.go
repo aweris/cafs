@@ -3,40 +3,78 @@ package cafs
 import (
 	"context"
 	"iter"
+	"os"
+	"time"
+
+	"github.com/go-viper/mapstructure/v2"
 )
 
 // Digest is an OCI content identifier (e.g., "sha256:abc123...").
 type Digest string
 
-// FS provides content-addressed storage with OCI sync.
-type FS interface {
-	Blobs() BlobStore
-	Index() Index
-
-	Sync() error                                    // persist index locally
-	Push(ctx context.Context, tags ...string) error // push to remote tags (default: current tag)
-	Pull(ctx context.Context) error                 // pull from remote
-	Close() error                                   // calls Sync()
-
-	Root() Digest
-	Dirty() bool
+// Info represents metadata about a stored entry.
+type Info struct {
+	Digest Digest // content hash
+	Size   int64  // content size
+	Meta   any    // optional user-defined metadata
 }
 
-// BlobStore handles content-addressed blob operations.
-type BlobStore interface {
-	Put(data []byte) (Digest, error)
-	Get(digest Digest) ([]byte, error)
-	Stat(digest Digest) (size int64, exists bool)
+// DecodeMeta decodes the metadata into a typed struct using mapstructure.
+func (i Info) DecodeMeta(out any) error {
+	if i.Meta == nil {
+		return nil
+	}
+	return mapstructure.Decode(i.Meta, out)
+}
+
+// FileMeta provides common file system metadata.
+type FileMeta struct {
+	Mode    os.FileMode `json:"mode,omitempty" mapstructure:"mode"`
+	ModTime time.Time   `json:"mtime,omitempty" mapstructure:"mtime"`
+}
+
+// FileMetaFrom creates FileMeta from os.FileInfo.
+func FileMetaFrom(info os.FileInfo) FileMeta {
+	return FileMeta{
+		Mode:    info.Mode(),
+		ModTime: info.ModTime(),
+	}
+}
+
+// FS provides content-addressed storage with OCI sync.
+type FS interface {
+	// Core operations
+	Put(key string, data []byte, opts ...Option) error
+	Get(key string) ([]byte, error)
+	Stat(key string) (Info, bool)
+	Delete(key string)
+
+	// Iteration
+	List(prefix string) iter.Seq2[string, Info]
+
+	// Tree hash
+	Hash(prefix string) Digest
+
+	// Sync
+	Sync() error
+	Push(ctx context.Context, tags ...string) error
+	Pull(ctx context.Context) error
+	Close() error
+
+	// Status
+	Root() Digest
+	Dirty() bool
+
+	// Advanced
 	Path(digest Digest) string
 }
 
-// Index maps keys to digests with merkle tree computation.
-type Index interface {
-	Set(key string, digest Digest)
-	Get(key string) (Digest, bool)
-	Delete(key string)
-	Entries() iter.Seq2[string, Digest]
+// Option configures a Put operation.
+type Option func(*Info)
 
-	Hash(prefix string) Digest
-	List(prefix string) iter.Seq2[string, Digest]
+// WithMeta sets custom metadata on the entry.
+func WithMeta(v any) Option {
+	return func(i *Info) {
+		i.Meta = v
+	}
 }

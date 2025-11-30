@@ -20,8 +20,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	digest, _ := fs.Blobs().Put([]byte("Hello from CAFS!"))
-	fs.Index().Set("message", digest)
+	fs.Put("message", []byte("Hello from CAFS!"))
 	fmt.Printf("Created: root=%s\n", fs.Root()[:20])
 
 	// Push to remote
@@ -49,7 +48,6 @@ func main() {
 	fmt.Printf("Roots match: %v\n", fs2.Root() == rootAfterPush)
 
 	// Verify data
-	d, _ := fs2.Index().Get("message")
-	data, _ := fs2.Blobs().Get(d)
+	data, _ := fs2.Get("message")
 	fmt.Printf("Content: %s\n", data)
 }

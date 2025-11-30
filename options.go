@@ -17,19 +17,19 @@ const (
 // Authenticator provides credentials for remote registries.
 type Authenticator = remote.Authenticator
 
-// Options configures a CAS store.
-type Options struct {
+// OpenOptions configures a CAS store.
+type OpenOptions struct {
 	CacheDir    string
 	Auth        Authenticator
 	AutoPull    string
 	Concurrency int
 }
 
-// Option is a functional option for configuring CAS.
-type Option func(*Options)
+// OpenOption is a functional option for configuring Open.
+type OpenOption func(*OpenOptions)
 
-func defaultOptions() *Options {
-	return &Options{
+func defaultOptions() *OpenOptions {
+	return &OpenOptions{
 		CacheDir:    defaultCacheDir(),
 		AutoPull:    AutoPullNever,
 		Concurrency: remote.DefaultConcurrency,
@@ -37,23 +37,23 @@ func defaultOptions() *Options {
 }
 
 // WithCacheDir sets the local cache directory.
-func WithCacheDir(dir string) Option {
-	return func(o *Options) { o.CacheDir = dir }
+func WithCacheDir(dir string) OpenOption {
+	return func(o *OpenOptions) { o.CacheDir = dir }
 }
 
 // WithAuth sets custom authentication.
-func WithAuth(auth Authenticator) Option {
-	return func(o *Options) { o.Auth = auth }
+func WithAuth(auth Authenticator) OpenOption {
+	return func(o *OpenOptions) { o.Auth = auth }
 }
 
 // WithAutoPull enables automatic pulling from remote on Open.
-func WithAutoPull(mode string) Option {
-	return func(o *Options) { o.AutoPull = mode }
+func WithAutoPull(mode string) OpenOption {
+	return func(o *OpenOptions) { o.AutoPull = mode }
 }
 
 // WithConcurrency sets the number of parallel operations for push/pull.
-func WithConcurrency(n int) Option {
-	return func(o *Options) {
+func WithConcurrency(n int) OpenOption {
+	return func(o *OpenOptions) {
 		if n > 0 {
 			o.Concurrency = n
 		}
