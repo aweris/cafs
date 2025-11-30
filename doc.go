@@ -1,6 +1,7 @@
 // Package cafs provides a content-addressable store with OCI registry sync and merkle tree semantics.
 //
-// CAFS stores blobs by content digest and indexes them by arbitrary keys.
+// CAFS stores blobs by content digest and indexes them by string keys.
+// Keys cannot be empty, exceed 1024 bytes, start with "_", or contain ".." or null bytes.
 // Directory hashes are computed on-demand from the flat index, enabling
 // instant comparison of subtrees without storing tree objects.
 //

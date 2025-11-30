@@ -88,10 +88,31 @@ func parseNamespace(s string) (namespace, tag string) {
 	return s, "latest"
 }
 
-// Put stores data at key with optional metadata.
-func (s *CAS) Put(key string, data []byte, opts ...Option) error {
+const maxKeyLength = 1024
+
+func validateKey(key string) error {
+	if key == "" {
+		return ErrInvalidKey
+	}
+	if len(key) > maxKeyLength {
+		return ErrInvalidKey
+	}
 	if strings.HasPrefix(key, "_") {
 		return ErrReservedKey
+	}
+	if strings.Contains(key, "\x00") {
+		return ErrInvalidKey
+	}
+	if strings.Contains(key, "..") {
+		return ErrInvalidKey
+	}
+	return nil
+}
+
+// Put stores data at key with optional metadata.
+func (s *CAS) Put(key string, data []byte, opts ...Option) error {
+	if err := validateKey(key); err != nil {
+		return err
 	}
 
 	digest, err := s.blobs.Put(data)
@@ -200,7 +221,7 @@ func (s *CAS) Ref() string {
 }
 
 func (s *CAS) Exists(key string) bool {
-	if strings.HasPrefix(key, "_") {
+	if validateKey(key) != nil {
 		return false
 	}
 	_, ok := s.entries.Load(key)
