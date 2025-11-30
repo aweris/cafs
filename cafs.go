@@ -285,8 +285,14 @@ func (s *CAS) Sync() error {
 		return fmt.Errorf("serialize index: %w", err)
 	}
 
-	if err := os.WriteFile(indexPath, data, 0644); err != nil {
+	// Atomic write: temp file + rename
+	tmpPath := indexPath + ".tmp"
+	if err := os.WriteFile(tmpPath, data, 0644); err != nil {
 		return fmt.Errorf("write index: %w", err)
+	}
+	if err := os.Rename(tmpPath, indexPath); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("rename index: %w", err)
 	}
 
 	s.dirty.Store(false)
