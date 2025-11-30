@@ -44,7 +44,7 @@ func Open(namespace string, opts ...OpenOption) (Store, error) {
 	}
 
 	cacheDir := expandPath(options.CacheDir)
-	blobDir := filepath.Join(cacheDir, "blobs", "sha256")
+	blobDir := filepath.Join(cacheDir, ns, "blobs", "sha256")
 	if err := os.MkdirAll(blobDir, 0755); err != nil {
 		return nil, fmt.Errorf("create blob dir: %w", err)
 	}
@@ -294,7 +294,7 @@ func (s *CAS) Sync() error {
 }
 
 func (s *CAS) indexPath() string {
-	return filepath.Join(s.cacheDir, "index", s.namespace, s.tag+".json")
+	return filepath.Join(s.cacheDir, s.namespace, s.tag+".json")
 }
 
 // Push uploads to the specified tags.
