@@ -20,6 +20,7 @@ type Authenticator = remote.Authenticator
 // OpenOptions configures a CAS store.
 type OpenOptions struct {
 	CacheDir    string
+	Remote      string // OCI image ref for push/pull (optional)
 	Auth        Authenticator
 	AutoPull    string
 	Concurrency int
@@ -41,7 +42,12 @@ func WithCacheDir(dir string) OpenOption {
 	return func(o *OpenOptions) { o.CacheDir = dir }
 }
 
-// WithAuth sets custom authentication.
+// WithRemote sets the OCI registry image ref for push/pull operations.
+func WithRemote(imageRef string) OpenOption {
+	return func(o *OpenOptions) { o.Remote = imageRef }
+}
+
+// WithAuth sets custom authentication for remote operations.
 func WithAuth(auth Authenticator) OpenOption {
 	return func(o *OpenOptions) { o.Auth = auth }
 }

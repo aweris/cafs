@@ -12,6 +12,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	defer fs.Close()
 
 	// Store some files in a directory structure
 	files := map[string]string{

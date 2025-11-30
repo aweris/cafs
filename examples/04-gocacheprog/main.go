@@ -56,7 +56,7 @@ func main() {
 	}
 }
 
-func run(r io.Reader, w io.Writer, fs cafs.FS) error {
+func run(r io.Reader, w io.Writer, fs cafs.Store) error {
 	dec := json.NewDecoder(r)
 	enc := json.NewEncoder(w)
 
@@ -95,7 +95,7 @@ func run(r io.Reader, w io.Writer, fs cafs.FS) error {
 	}
 }
 
-func handle(req Request, body []byte, fs cafs.FS) Response {
+func handle(req Request, body []byte, fs cafs.Store) Response {
 	switch req.Command {
 	case CmdGet:
 		return handleGet(req, fs)
@@ -108,7 +108,7 @@ func handle(req Request, body []byte, fs cafs.FS) Response {
 	}
 }
 
-func handleGet(req Request, fs cafs.FS) Response {
+func handleGet(req Request, fs cafs.Store) Response {
 	actionID := hex.EncodeToString(req.ActionID)
 
 	info, ok := fs.Stat(actionID)
@@ -134,7 +134,7 @@ func handleGet(req Request, fs cafs.FS) Response {
 	}
 }
 
-func handlePut(req Request, body []byte, fs cafs.FS) Response {
+func handlePut(req Request, body []byte, fs cafs.Store) Response {
 	actionID := hex.EncodeToString(req.ActionID)
 	outputID := hex.EncodeToString(req.OutputID)
 

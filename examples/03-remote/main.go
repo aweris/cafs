@@ -11,11 +11,14 @@ import (
 
 func main() {
 	// Use ttl.sh (free, anonymous, temporary registry)
-	imageRef := fmt.Sprintf("ttl.sh/cafs-demo-%d:main", time.Now().Unix())
+	remoteRef := fmt.Sprintf("ttl.sh/cafs-demo-%d:main", time.Now().Unix())
 	ctx := context.Background()
 
-	// Create store and add some data
-	fs, err := cafs.Open(imageRef, cafs.WithCacheDir("/tmp/cafs-remote-demo"))
+	// Create store with remote sync
+	fs, err := cafs.Open("demo/remote:main",
+		cafs.WithCacheDir("/tmp/cafs-remote-demo"),
+		cafs.WithRemote(remoteRef),
+	)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -35,8 +38,9 @@ func main() {
 
 	// Simulate fresh start - open new store, pull from remote
 	fmt.Println("\nOpening fresh store...")
-	fs2, err := cafs.Open(imageRef,
+	fs2, err := cafs.Open("demo/remote:main",
 		cafs.WithCacheDir("/tmp/cafs-remote-demo-2"),
+		cafs.WithRemote(remoteRef),
 		cafs.WithAutoPull("always"),
 	)
 	if err != nil {

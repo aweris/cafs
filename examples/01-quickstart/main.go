@@ -15,9 +15,7 @@ func main() {
 	defer fs.Close()
 
 	// Store content at key
-	if err := fs.Put("greeting", []byte("Hello, CAFS!")); err != nil {
-		log.Fatal(err)
-	}
+	_ = fs.Put("greeting", []byte("Hello, CAFS!"))
 
 	// Get info about the entry
 	info, ok := fs.Stat("greeting")

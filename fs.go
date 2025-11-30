@@ -41,13 +41,21 @@ func FileMetaFrom(info os.FileInfo) FileMeta {
 	}
 }
 
-// FS provides content-addressed storage with OCI sync.
-type FS interface {
+// Stats contains storage statistics.
+type Stats struct {
+	Entries   int   // number of user entries
+	Blobs     int   // number of unique blobs on disk
+	TotalSize int64 // total size of all blobs
+}
+
+// Store provides content-addressed storage with OCI sync.
+type Store interface {
 	// Core operations
 	Put(key string, data []byte, opts ...Option) error
 	Get(key string) ([]byte, error)
 	Stat(key string) (Info, bool)
 	Delete(key string)
+	Clear()
 
 	// Iteration
 	List(prefix string) iter.Seq2[string, Info]
@@ -64,6 +72,13 @@ type FS interface {
 	// Status
 	Root() Digest
 	Dirty() bool
+	Len() int
+	Ref() string
+	Exists(key string) bool
+	Stats() Stats
+
+	// Maintenance
+	GC() (removed int, err error)
 
 	// Advanced
 	Path(digest Digest) string

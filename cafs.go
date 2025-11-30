@@ -21,19 +21,26 @@ const digestPrefix = "sha256:"
 
 // CAS is the main content-addressable storage implementation.
 type CAS struct {
-	blobs    *blobStore
-	entries  sync.Map // key -> Info
-	remote   *remote.OCIRemote
-	rootHash Digest
-	cacheDir string
-	dirty    atomic.Bool
+	blobs     *blobStore
+	entries   sync.Map // key -> Info
+	remote    *remote.OCIRemote
+	namespace string
+	tag       string
+	cacheDir  string
+	dirty     atomic.Bool
 }
 
-// Open creates or opens a store for the given image ref (e.g., "ttl.sh/cache/go:main").
-func Open(imageRef string, opts ...OpenOption) (FS, error) {
+// Open creates or opens a store for the given namespace.
+// Format: "namespace" or "namespace:tag" (default tag is "latest").
+func Open(namespace string, opts ...OpenOption) (Store, error) {
 	options := defaultOptions()
 	for _, opt := range opts {
 		opt(options)
+	}
+
+	ns, tag := parseNamespace(namespace)
+	if ns == "" {
+		return nil, fmt.Errorf("namespace is required")
 	}
 
 	cacheDir := expandPath(options.CacheDir)
@@ -42,36 +49,51 @@ func Open(imageRef string, opts ...OpenOption) (FS, error) {
 		return nil, fmt.Errorf("create blob dir: %w", err)
 	}
 
-	auth := options.Auth
-	if auth == nil {
-		auth = remote.NewDefaultAuthenticator()
-	}
-
-	ociRemote, err := remote.NewOCIRemote(imageRef, auth)
-	if err != nil {
-		return nil, err
-	}
-	ociRemote.SetConcurrency(options.Concurrency)
-
 	s := &CAS{
-		blobs:    &blobStore{dir: blobDir},
-		remote:   ociRemote,
-		cacheDir: cacheDir,
+		blobs:     &blobStore{dir: blobDir},
+		namespace: ns,
+		tag:       tag,
+		cacheDir:  cacheDir,
 	}
 
-	if err := s.loadLocalIndex(); err == nil {
-		s.rootHash = s.Hash("")
+	// Setup remote if specified
+	if options.Remote != "" {
+		auth := options.Auth
+		if auth == nil {
+			auth = remote.NewDefaultAuthenticator()
+		}
+
+		ociRemote, err := remote.NewOCIRemote(options.Remote, auth)
+		if err != nil {
+			return nil, fmt.Errorf("invalid remote %q: %w", options.Remote, err)
+		}
+		ociRemote.SetConcurrency(options.Concurrency)
+		s.remote = ociRemote
 	}
 
-	if options.AutoPull == AutoPullAlways || options.AutoPull == AutoPullMissing {
+	_ = s.loadLocalIndex()
+
+	if s.remote != nil && (options.AutoPull == AutoPullAlways || options.AutoPull == AutoPullMissing) {
 		_ = s.Pull(context.Background())
 	}
 
 	return s, nil
 }
 
+// parseNamespace splits "namespace:tag" into parts. Default tag is "latest".
+func parseNamespace(s string) (namespace, tag string) {
+	if idx := strings.LastIndex(s, ":"); idx != -1 {
+		return s[:idx], s[idx+1:]
+	}
+	return s, "latest"
+}
+
 // Put stores data at key with optional metadata.
 func (s *CAS) Put(key string, data []byte, opts ...Option) error {
+	if strings.HasPrefix(key, "_") {
+		return ErrReservedKey
+	}
+
 	digest, err := s.blobs.Put(data)
 	if err != nil {
 		return err
@@ -95,7 +117,7 @@ func (s *CAS) Put(key string, data []byte, opts ...Option) error {
 func (s *CAS) Get(key string) ([]byte, error) {
 	v, ok := s.entries.Load(key)
 	if !ok {
-		return nil, fmt.Errorf("key not found: %s", key)
+		return nil, ErrNotFound
 	}
 	info := v.(Info)
 	return s.blobs.Get(info.Digest)
@@ -142,7 +164,6 @@ func (s *CAS) Hash(prefix string) Digest {
 		}
 		if rel, ok := strings.CutPrefix(key, prefix); ok {
 			info := v.(Info)
-			// Include digest + size in hash (metadata is optional/variable)
 			items = append(items, fmt.Sprintf("%s\x00%s\x00%d", rel, info.Digest, info.Size))
 		}
 		return true
@@ -159,6 +180,90 @@ func (s *CAS) Hash(prefix string) Digest {
 func (s *CAS) Root() Digest { return s.Hash("") }
 func (s *CAS) Dirty() bool  { return s.dirty.Load() }
 func (s *CAS) Close() error { return s.Sync() }
+
+func (s *CAS) Len() int {
+	count := 0
+	s.entries.Range(func(k, _ any) bool {
+		if !strings.HasPrefix(k.(string), prefixHashKeyPrefix) {
+			count++
+		}
+		return true
+	})
+	return count
+}
+
+func (s *CAS) Ref() string {
+	if s.remote == nil {
+		return ""
+	}
+	return s.remote.String()
+}
+
+func (s *CAS) Exists(key string) bool {
+	if strings.HasPrefix(key, "_") {
+		return false
+	}
+	_, ok := s.entries.Load(key)
+	return ok
+}
+
+func (s *CAS) Clear() {
+	s.entries.Range(func(k, _ any) bool {
+		s.entries.Delete(k)
+		return true
+	})
+	s.dirty.Store(true)
+}
+
+func (s *CAS) Stats() Stats {
+	var st Stats
+	digests := make(map[Digest]struct{})
+
+	s.entries.Range(func(k, v any) bool {
+		key := k.(string)
+		if strings.HasPrefix(key, prefixHashKeyPrefix) {
+			return true
+		}
+		st.Entries++
+		info := v.(Info)
+		digests[info.Digest] = struct{}{}
+		return true
+	})
+
+	for digest := range digests {
+		if fi, err := os.Stat(s.blobs.blobPath(digest)); err == nil {
+			st.Blobs++
+			st.TotalSize += fi.Size()
+		}
+	}
+	return st
+}
+
+func (s *CAS) GC() (int, error) {
+	referenced := make(map[string]struct{})
+	s.entries.Range(func(_, v any) bool {
+		info := v.(Info)
+		hash := strings.TrimPrefix(string(info.Digest), digestPrefix)
+		referenced[hash] = struct{}{}
+		return true
+	})
+
+	removed := 0
+	err := filepath.WalkDir(s.blobs.dir, func(path string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		rel, _ := filepath.Rel(s.blobs.dir, path)
+		hash := strings.ReplaceAll(rel, string(filepath.Separator), "")
+		if _, ok := referenced[hash]; !ok {
+			if err := os.Remove(path); err == nil {
+				removed++
+			}
+		}
+		return nil
+	})
+	return removed, err
+}
 
 // Path returns the filesystem path for a digest (for advanced use cases).
 func (s *CAS) Path(digest Digest) string {
@@ -189,9 +294,7 @@ func (s *CAS) Sync() error {
 }
 
 func (s *CAS) indexPath() string {
-	name := strings.ReplaceAll(s.remote.String(), "/", "_")
-	name = strings.ReplaceAll(name, ":", "_")
-	return filepath.Join(s.cacheDir, "index", name+".json")
+	return filepath.Join(s.cacheDir, "index", s.namespace, s.tag+".json")
 }
 
 // Push uploads to the specified tags.
@@ -242,7 +345,6 @@ func (s *CAS) pushToTag(ctx context.Context, tag string) error {
 
 	s.savePrefixHashes(newPrefixes)
 	s.blobs.pending = sync.Map{}
-	s.rootHash = indexDigest
 	return nil
 }
 
@@ -284,7 +386,6 @@ func (s *CAS) Pull(ctx context.Context) error {
 		return fmt.Errorf("sync: %w", err)
 	}
 
-	s.rootHash = indexDigest
 	return nil
 }
 
